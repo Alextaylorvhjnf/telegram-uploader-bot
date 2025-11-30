@@ -111,40 +111,73 @@ def escape_html(text: str) -> str:
     
     return text
 
-def truncate_text(text: str, max_length: int = 900) -> str:
-    """کوتاه کردن متن اگر از حد مجاز بیشتر باشد"""
-    if len(text) <= max_length:
-        return text
+def clean_old_footer(content: str) -> str:
+    """پاک کردن فوترهای قدیمی از محتوای اصلی"""
+    if not content:
+        return content
     
-    logger.warning(f"متن از {max_length} کاراکتر بیشتر است، در حال کوتاه کردن...")
-    return text[:max_length] + "..."
+    # الگوهای مختلف برای شناسایی فوترهای قدیمی
+    footer_patterns = [
+        r'📅 تاریخ پخش:\{.*?\}.*?🎥 با اپی‌مووی، دنیای سینما در دستان شماست\.',
+        r'🌐 وبسایت و اپلیکیشن: Apmovie\.net.*?🎥 با اپی‌مووی، دنیای سینما در دستان شماست\.',
+        r'───────────────.*?🎥 با اپی‌مووی، دنیای سینما در دستان شماست\.',
+    ]
+    
+    cleaned_content = content
+    for pattern in footer_patterns:
+        cleaned_content = re.sub(pattern, '', cleaned_content, flags=re.DOTALL)
+    
+    # حذف خطوط خالی اضافی در انتها
+    cleaned_content = cleaned_content.rstrip()
+    
+    return cleaned_content
 
 def process_content(original_text: str, is_caption: bool = False) -> str:
     """پردازش کامل محتوا و اضافه کردن فوتر ثابت"""
     if not original_text:
         return FOOTER_TEMPLATE
     
+    # پاک کردن فوترهای قدیمی
+    main_content = clean_old_footer(original_text)
+    
     # جایگزینی یوزرنیم‌ها
-    main_content = replace_usernames(original_text)
+    main_content = replace_usernames(main_content)
     
     # فرار کردن کاراکترهای HTML در محتوای اصلی
     main_content = escape_html(main_content)
     
-    # اگر کپشن است و متن اصلی خیلی طولانی است، آن را کوتاه کن
-    if is_caption:
-        main_content = truncate_text(main_content, 900)
-    
     # ترکیب محتوای اصلی با فوتر جدید
     final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
     
-    # اگر بازهم طولانی است، کوتاه‌تر کن
-    if len(final_content) > 1024:
-        logger.warning("متن نهایی هنوز طولانی است، کوتاه کردن بیشتر...")
-        available_space = 1024 - len(FOOTER_TEMPLATE) - 50
-        if available_space > 100:
-            main_content = truncate_text(main_content, available_space)
+    # اگر طولانی است، محتوای اصلی را کوتاه کن اما فوتر را کامل نگه دار
+    if len(final_content) > 4096:  # حداکثر طول مجاز تلگرام
+        logger.warning("متن نهایی از 4096 کاراکتر بیشتر است، در حال کوتاه کردن محتوای اصلی...")
+        
+        # محاسبه فضای قابل استفاده برای محتوای اصلی
+        available_space = 4096 - len(FOOTER_TEMPLATE) - 50  # فضای برای جداکننده
+        
+        if available_space > 500:  # حداقل 500 کاراکتر برای محتوای اصلی
+            # کوتاه کردن محتوای اصلی اما حفظ ساختار
+            lines = main_content.split('\n')
+            shortened_content = []
+            current_length = 0
+            
+            for line in lines:
+                if current_length + len(line) + 1 <= available_space:
+                    shortened_content.append(line)
+                    current_length += len(line) + 1
+                else:
+                    # اگر خط جدید فضای کافی ندارد، سعی کن آن را کوتاه کن
+                    remaining_space = available_space - current_length
+                    if remaining_space > 50:  # حداقل 50 کاراکتر برای خط آخر
+                        shortened_line = line[:remaining_space - 3] + "..."
+                        shortened_content.append(shortened_line)
+                    break
+            
+            main_content = '\n'.join(shortened_content)
             final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
         else:
+            # اگر فضای کافی نیست، فقط فوتر را بفرست
             final_content = FOOTER_TEMPLATE
     
     logger.info(f"✅ محتوا پردازش شد (طول: {len(final_content)} کاراکتر)")
@@ -163,7 +196,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.info(f"پیام {message.message_id} قبلاً پردازش شده")
             return
         
-        logger.info(f"دریافت پیام جدید: {message.message_id}")
+        logger.info(f"📨 دریافت پیام جدید: {message.message_id}")
         
         processed_text = None
         is_caption = False
@@ -190,7 +223,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=False
             )
-            logger.info("✅ پیام متتی با لینک‌های HTML ارسال شد")
+            logger.info("✅ پیام متنی با لینک‌های HTML ارسال شد")
         
         elif message.photo:
             await context.bot.send_photo(
@@ -260,28 +293,40 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
 🙏 از حمایت ارزشمند شما سپاسگزاریم 🌹
 🎥 با اپی‌مووی، دنیای سینما در دستان شماست."""
             
+            # استفاده از محتوای اصلی ساده شده
+            simple_content = ""
+            if message.text:
+                simple_content = replace_usernames(message.text)
+            elif message.caption:
+                simple_content = replace_usernames(message.caption)
+            
+            if simple_content:
+                final_simple_content = f"{simple_content}\n\n{simple_footer}"
+            else:
+                final_simple_content = simple_footer
+            
             if message.photo:
                 await context.bot.send_photo(
                     chat_id=DESTINATION_CHANNEL_ID,
                     photo=message.photo[-1].file_id,
-                    caption=simple_footer
+                    caption=final_simple_content
                 )
             elif message.video:
                 await context.bot.send_video(
                     chat_id=DESTINATION_CHANNEL_ID,
                     video=message.video.file_id,
-                    caption=simple_footer
+                    caption=final_simple_content
                 )
             elif message.document:
                 await context.bot.send_document(
                     chat_id=DESTINATION_CHANNEL_ID,
                     document=message.document.file_id,
-                    caption=simple_footer
+                    caption=final_simple_content
                 )
             else:
                 await context.bot.send_message(
                     chat_id=DESTINATION_CHANNEL_ID,
-                    text=simple_footer
+                    text=final_simple_content
                 )
             logger.info("✅ پست با متن ساده ارسال شد")
         except Exception as fallback_error:
@@ -300,8 +345,9 @@ def main():
     logger.info(f"📤 کانال مقصد: {DESTINATION_CHANNEL_ID}")
     logger.info(f"🔁 جایگزینی با: {REPLACEMENT_USERNAME}")
     logger.info("📋 قالب ثابت فوتر با لینک‌های HTML فعال شد")
-    logger.info("⚠️ مدیریت طول متن فعال شد (حداکثر 1024 کاراکتر)")
+    logger.info("⚠️ مدیریت طول متن فعال شد (حداکثر 4096 کاراکتر)")
     logger.info("🔗 لینک‌های قابل کلیک فعال شدند")
+    logger.info("📖 حفظ کامل محتوای اصلی (شامل خلاصه داستان) فعال شد")
     
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
