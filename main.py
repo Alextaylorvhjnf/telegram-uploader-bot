@@ -7,7 +7,10 @@ from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 # ==================== تنظیمات مستقیم ====================
 BOT_TOKEN = "8379314037:AAEpz2EuVtkynaFqCi16bCJvRlMRnTr8K7w"
-SOURCE_CHANNEL_ID = -1003319450332
+SOURCE_CHANNELS = [
+    -1003319450332,  # کانال سورس اول
+    -1003442708764   # کانال سورس دوم
+]
 DESTINATION_CHANNEL_ID = -1002061481133
 REPLACEMENT_USERNAME = "@apmovienet"
 
@@ -55,27 +58,28 @@ class Database:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS processed_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                message_id INTEGER UNIQUE,
+                message_id INTEGER,
                 source_channel_id INTEGER,
-                processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(message_id, source_channel_id)
             )
         ''')
         self.conn.commit()
     
-    def is_message_processed(self, message_id: int) -> bool:
+    def is_message_processed(self, message_id: int, source_channel_id: int) -> bool:
         cursor = self.conn.cursor()
         cursor.execute(
             'SELECT 1 FROM processed_messages WHERE message_id = ? AND source_channel_id = ?',
-            (message_id, SOURCE_CHANNEL_ID)
+            (message_id, source_channel_id)
         )
         return cursor.fetchone() is not None
     
-    def mark_message_processed(self, message_id: int):
+    def mark_message_processed(self, message_id: int, source_channel_id: int):
         cursor = self.conn.cursor()
         try:
             cursor.execute(
                 'INSERT INTO processed_messages (message_id, source_channel_id) VALUES (?, ?)',
-                (message_id, SOURCE_CHANNEL_ID)
+                (message_id, source_channel_id)
             )
             self.conn.commit()
         except sqlite3.IntegrityError:
@@ -124,31 +128,33 @@ def process_content(original_text: str, is_caption: bool = False) -> str:
     # اگر بازهم طولانی است، کوتاه‌تر کن
     if len(final_content) > 1024:
         logger.warning("متن نهایی هنوز طولانی است، کوتاه کردن بیشتر...")
-        available_space = 1024 - len(FOOTER_TEMPLATE) - 50  # فضای برای جداکننده و ...
-        if available_space > 100:  # حداقل 100 کاراکتر برای محتوای اصلی
+        available_space = 1024 - len(FOOTER_TEMPLATE) - 50
+        if available_space > 100:
             main_content = truncate_text(main_content, available_space)
             final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
         else:
-            # اگر فضای کافی نیست، فقط فوتر را بفرست
             final_content = FOOTER_TEMPLATE
     
     logger.info(f"✅ محتوا پردازش شد (طول: {len(final_content)} کاراکتر)")
     return final_content
 
 async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """پردازش پست‌های کانال سورس"""
-    if update.channel_post.chat.id != SOURCE_CHANNEL_ID:
+    """پردازش پست‌های کانال‌های سورس"""
+    message = update.channel_post
+    source_channel_id = message.chat.id
+    
+    # بررسی اینکه پیام از یکی از کانال‌های سورس مورد نظر است
+    if source_channel_id not in SOURCE_CHANNELS:
         return
     
-    message = update.channel_post
     db = Database()
     
     try:
-        if db.is_message_processed(message.message_id):
-            logger.info(f"پیام {message.message_id} قبلاً پردازش شده")
+        if db.is_message_processed(message.message_id, source_channel_id):
+            logger.info(f"پیام {message.message_id} از کانال {source_channel_id} قبلاً پردازش شده")
             return
         
-        logger.info(f"دریافت پیام جدید: {message.message_id}")
+        logger.info(f"📨 دریافت پیام جدید از کانال {source_channel_id}: {message.message_id}")
         
         processed_text = None
         is_caption = False
@@ -207,11 +213,11 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
                 )
                 logger.info("✅ متن پردازش شده ارسال شد")
         
-        db.mark_message_processed(message.message_id)
-        logger.info(f"🎉 پیام {message.message_id} با موفقیت پردازش و ارسال شد")
+        db.mark_message_processed(message.message_id, source_channel_id)
+        logger.info(f"🎉 پیام {message.message_id} از کانال {source_channel_id} با موفقیت پردازش و ارسال شد")
         
     except Exception as e:
-        logger.error(f"❌ خطا در پردازش پیام: {e}")
+        logger.error(f"❌ خطا در پردازش پیام از کانال {source_channel_id}: {e}")
         
         # تلاش برای ارسال بدون فوتر در صورت خطا
         try:
@@ -248,14 +254,17 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
 def main():
     """تابع اصلی"""
     application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(MessageHandler(filters.Chat(SOURCE_CHANNEL_ID), process_channel_post))
+    
+    # افزودن هندلر برای تمام کانال‌های سورس
+    application.add_handler(MessageHandler(filters.Chat(SOURCE_CHANNELS), process_channel_post))
     
     logger.info("🤖 ربات راه‌اندازی شد...")
-    logger.info(f"📥 کانال مبدأ: {SOURCE_CHANNEL_ID}")
+    logger.info(f"📥 کانال‌های مبدأ: {SOURCE_CHANNELS}")
     logger.info(f"📤 کانال مقصد: {DESTINATION_CHANNEL_ID}")
     logger.info(f"🔁 جایگزینی با: {REPLACEMENT_USERNAME}")
     logger.info("📋 قالب ثابت فوتر فعال شد")
     logger.info("⚠️ مدیریت طول متن فعال شد (حداکثر 1024 کاراکتر)")
+    logger.info("🔄 پشتیبانی از چندین کانال سورس فعال شد")
     
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
