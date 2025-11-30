@@ -7,7 +7,7 @@ from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from telegram.constants import ParseMode
 
 # ==================== تنظیمات از Environment Variables ====================
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8379314037:AAEpz2EuVtkynaFqCi16bCJvRlMRnTr8K7w')
+BOT_TOKEN = os.getenv('BOT_TOKEN')
 SOURCE_CHANNEL_ID = int(os.getenv('SOURCE_CHANNEL_ID', '-1003319450332'))
 DESTINATION_CHANNEL_ID = int(os.getenv('DESTINATION_CHANNEL_ID', '-1002061481133'))
 REPLACEMENT_USERNAME = os.getenv('REPLACEMENT_USERNAME', '@apmovienet')
@@ -22,7 +22,10 @@ logger = logging.getLogger(__name__)
 # ==================== دیتابیس ====================
 class Database:
     def __init__(self):
-        self.conn = sqlite3.connect('processed_messages.db', check_same_thread=False)
+        self.conn = sqlite3.connect(
+            '/tmp/processed_messages.db' if 'RAILWAY_ENVIRONMENT' in os.environ else 'processed_messages.db',
+            check_same_thread=False
+        )
         self.create_table()
     
     def create_table(self):
@@ -56,8 +59,9 @@ class Database:
                 (message_id, SOURCE_CHANNEL_ID)
             )
             self.conn.commit()
+            logger.info(f"📝 پیام {message_id} در دیتابیس ثبت شد")
         except sqlite3.IntegrityError:
-            pass  # پیام قبلاً پردازش شده
+            logger.info(f"⏭️ پیام {message_id} قبلاً در دیتابیس وجود داشت")
     
     def close(self):
         """بستن اتصال دیتابیس"""
@@ -72,7 +76,7 @@ def replace_usernames(text: str) -> str:
         return text
     
     # الگو برای پیدا کردن یوزرنیم‌های تلگرام
-    username_pattern = r'@[a-zA-Z0-9_]{5,32}'
+    username_pattern = r'@[a-zA-Z0-9_]{1,32}'
     
     # جایگزینی همه یوزرنیم‌ها
     replaced_text = re.sub(username_pattern, REPLACEMENT_USERNAME, text)
@@ -80,7 +84,7 @@ def replace_usernames(text: str) -> str:
     # لاگ تغییرات
     original_usernames = re.findall(username_pattern, text)
     if original_usernames:
-        logger.info(f"🔁 جایگزینی {len(original_usernames)} یوزرنیم: {original_usernames} -> {REPLACEMENT_USERNAME}")
+        logger.info(f"🔁 جایگزینی {len(original_usernames)} یوزرنیم: {set(original_usernames)} -> {REPLACEMENT_USERNAME}")
     
     return replaced_text
 
@@ -107,8 +111,10 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
         processed_text = None
         if message.text:
             processed_text = replace_usernames(message.text)
+            logger.info("📝 پردازش متن پیام")
         elif message.caption:
             processed_text = replace_usernames(message.caption)
+            logger.info("📝 پردازش کپشن مدیا")
         
         # ارسال به کانال مقصد بر اساس نوع محتوا
         if message.text and not message.media:
@@ -124,7 +130,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
             # پیام با عکس
             await context.bot.send_photo(
                 chat_id=DESTINATION_CHANNEL_ID,
-                photo=message.photo[-1].file_id,  # بزرگترین سایز عکس
+                photo=message.photo[-1].file_id,
                 caption=processed_text,
                 parse_mode=ParseMode.HTML if message.caption_entities else None
             )
@@ -169,12 +175,12 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
                 )
                 logger.info("✅ متن پردازش شده ارسال شد")
             else:
-                logger.warning("⚠️ نوع پیام پشتیبانی نمی‌شود")
+                logger.warning(f"⚠️ نوع پیام پشتیبانی نمی‌شود: {message.message_id}")
                 return
         
         # علامت گذاری پیام به عنوان پردازش شده
         db.mark_message_processed(message.message_id)
-        logger.info(f"✅ پیام {message.message_id} با موفقیت پردازش و ارسال شد")
+        logger.info(f"🎉 پیام {message.message_id} با موفقیت پردازش و ارسال شد")
         
     except Exception as e:
         logger.error(f"❌ خطا در پردازش پیام {message.message_id}: {str(e)}")
@@ -183,11 +189,11 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
         db.close()
 
 # ==================== راه‌اندازی ربات ====================
-async def main():
+def main():
     """تابع اصلی راه‌اندازی ربات"""
     
     # اعتبارسنجی متغیرهای محیطی
-    required_vars = ['BOT_TOKEN', 'SOURCE_CHANNEL_ID', 'DESTINATION_CHANNEL_ID']
+    required_vars = ['BOT_TOKEN']
     missing_vars = [var for var in required_vars if not os.getenv(var)]
     
     if missing_vars:
@@ -205,13 +211,13 @@ async def main():
     logger.info(f"📥 کانال سورس: {SOURCE_CHANNEL_ID}")
     logger.info(f"📤 کانال مقصد: {DESTINATION_CHANNEL_ID}")
     logger.info(f"🔁 جایگزینی یوزرنیم‌ها با: {REPLACEMENT_USERNAME}")
+    logger.info("🟢 ربات آماده دریافت پیام‌ها است...")
     
     # شروع polling
-    await application.run_polling(
+    application.run_polling(
         allowed_updates=Update.ALL_TYPES,
         drop_pending_updates=True
     )
 
 if __name__ == '__main__':
-    import asyncio
-    asyncio.run(main())
+    main()
