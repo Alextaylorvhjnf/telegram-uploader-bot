@@ -98,7 +98,15 @@ def replace_usernames(text: str) -> str:
     
     return replaced_text
 
-def process_content(original_text: str) -> str:
+def truncate_text(text: str, max_length: int = 900) -> str:
+    """کوتاه کردن متن اگر از حد مجاز بیشتر باشد"""
+    if len(text) <= max_length:
+        return text
+    
+    logger.warning(f"متن از {max_length} کاراکتر بیشتر است، در حال کوتاه کردن...")
+    return text[:max_length] + "..."
+
+def process_content(original_text: str, is_caption: bool = False) -> str:
     """پردازش کامل محتوا و اضافه کردن فوتر ثابت"""
     if not original_text:
         return FOOTER_TEMPLATE
@@ -106,10 +114,25 @@ def process_content(original_text: str) -> str:
     # جایگزینی یوزرنیم‌ها
     main_content = replace_usernames(original_text)
     
+    # اگر کپشن است و متن اصلی خیلی طولانی است، آن را کوتاه کن
+    if is_caption:
+        main_content = truncate_text(main_content, 900)
+    
     # ترکیب محتوای اصلی با فوتر جدید
     final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
     
-    logger.info("✅ محتوا با فوتر جدید پردازش شد")
+    # اگر بازهم طولانی است، کوتاه‌تر کن
+    if len(final_content) > 1024:
+        logger.warning("متن نهایی هنوز طولانی است، کوتاه کردن بیشتر...")
+        available_space = 1024 - len(FOOTER_TEMPLATE) - 50  # فضای برای جداکننده و ...
+        if available_space > 100:  # حداقل 100 کاراکتر برای محتوای اصلی
+            main_content = truncate_text(main_content, available_space)
+            final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
+        else:
+            # اگر فضای کافی نیست، فقط فوتر را بفرست
+            final_content = FOOTER_TEMPLATE
+    
+    logger.info(f"✅ محتوا پردازش شد (طول: {len(final_content)} کاراکتر)")
     return final_content
 
 async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -128,13 +151,21 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.info(f"دریافت پیام جدید: {message.message_id}")
         
         processed_text = None
+        is_caption = False
+        
         if message.text:
             processed_text = process_content(message.text)
+            logger.info("📝 پردازش متن پیام")
         elif message.caption:
-            processed_text = process_content(message.caption)
+            processed_text = process_content(message.caption, is_caption=True)
+            is_caption = True
+            logger.info("📝 پردازش کپشن مدیا")
         
         if not processed_text:
             processed_text = FOOTER_TEMPLATE
+        
+        # لاگ طول متن نهایی
+        logger.info(f"📏 طول متن نهایی: {len(processed_text)} کاراکتر")
         
         # ارسال به کانال مقصد
         if message.text and not message.media:
@@ -142,7 +173,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
                 chat_id=DESTINATION_CHANNEL_ID,
                 text=processed_text
             )
-            logger.info("پیام متنی ارسال شد")
+            logger.info("✅ پیام متنی ارسال شد")
         
         elif message.photo:
             await context.bot.send_photo(
@@ -150,7 +181,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
                 photo=message.photo[-1].file_id,
                 caption=processed_text
             )
-            logger.info("عکس ارسال شد")
+            logger.info("✅ عکس با کپشن ارسال شد")
         
         elif message.video:
             await context.bot.send_video(
@@ -158,7 +189,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
                 video=message.video.file_id,
                 caption=processed_text
             )
-            logger.info("ویدیو ارسال شد")
+            logger.info("✅ ویدیو با کپشن ارسال شد")
         
         elif message.document:
             await context.bot.send_document(
@@ -166,7 +197,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
                 document=message.document.file_id,
                 caption=processed_text
             )
-            logger.info("فایل ارسال شد")
+            logger.info("✅ فایل با کپشن ارسال شد")
         
         else:
             if processed_text:
@@ -174,28 +205,58 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
                     chat_id=DESTINATION_CHANNEL_ID,
                     text=processed_text
                 )
+                logger.info("✅ متن پردازش شده ارسال شد")
         
         db.mark_message_processed(message.message_id)
-        logger.info(f"پیام {message.message_id} با موفقیت ارسال شد")
+        logger.info(f"🎉 پیام {message.message_id} با موفقیت پردازش و ارسال شد")
         
     except Exception as e:
-        logger.error(f"خطا در پردازش پیام: {e}")
+        logger.error(f"❌ خطا در پردازش پیام: {e}")
+        
+        # تلاش برای ارسال بدون فوتر در صورت خطا
+        try:
+            if message.photo:
+                await context.bot.send_photo(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    photo=message.photo[-1].file_id,
+                    caption="پست جدید - خطا در پردازش متن کامل"
+                )
+            elif message.video:
+                await context.bot.send_video(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    video=message.video.file_id,
+                    caption="پست جدید - خطا در پردازش متن کامل"
+                )
+            elif message.document:
+                await context.bot.send_document(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    document=message.document.file_id,
+                    caption="پست جدید - خطا در پردازش متن کامل"
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    text=FOOTER_TEMPLATE
+                )
+            logger.info("✅ پست با متن جایگزین ارسال شد")
+        except Exception as fallback_error:
+            logger.error(f"❌ خطا در ارسال جایگزین: {fallback_error}")
     
     finally:
         db.close()
 
 def main():
-    """تابع اصلی - بدون asyncio.run"""
+    """تابع اصلی"""
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(MessageHandler(filters.Chat(SOURCE_CHANNEL_ID), process_channel_post))
     
-    logger.info("ربات راه‌اندازی شد...")
-    logger.info(f"کانال مبدأ: {SOURCE_CHANNEL_ID}")
-    logger.info(f"کانال مقصد: {DESTINATION_CHANNEL_ID}")
-    logger.info(f"جایگزینی با: {REPLACEMENT_USERNAME}")
-    logger.info("قالب ثابت فوتر فعال شد")
+    logger.info("🤖 ربات راه‌اندازی شد...")
+    logger.info(f"📥 کانال مبدأ: {SOURCE_CHANNEL_ID}")
+    logger.info(f"📤 کانال مقصد: {DESTINATION_CHANNEL_ID}")
+    logger.info(f"🔁 جایگزینی با: {REPLACEMENT_USERNAME}")
+    logger.info("📋 قالب ثابت فوتر فعال شد")
+    logger.info("⚠️ مدیریت طول متن فعال شد (حداکثر 1024 کاراکتر)")
     
-    # استفاده از run_polling به صورت مستقیم
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
         drop_pending_updates=True
