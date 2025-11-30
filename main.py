@@ -138,6 +138,26 @@ def process_content(original_text: str, is_caption: bool = False) -> str:
     logger.info(f"✅ محتوا پردازش شد (طول: {len(final_content)} کاراکتر)")
     return final_content
 
+async def test_channel_access(context: ContextTypes.DEFAULT_TYPE):
+    """تست دسترسی به کانال‌ها"""
+    try:
+        for channel_id in SOURCE_CHANNELS:
+            try:
+                chat = await context.bot.get_chat(channel_id)
+                logger.info(f"✅ دسترسی به کانال {channel_id} تأیید شد: {chat.title}")
+            except Exception as e:
+                logger.error(f"❌ خطا در دسترسی به کانال {channel_id}: {e}")
+        
+        # تست دسترسی به کانال مقصد
+        try:
+            dest_chat = await context.bot.get_chat(DESTINATION_CHANNEL_ID)
+            logger.info(f"✅ دسترسی به کانال مقصد تأیید شد: {dest_chat.title}")
+        except Exception as e:
+            logger.error(f"❌ خطا در دسترسی به کانال مقصد: {e}")
+            
+    except Exception as e:
+        logger.error(f"❌ خطا در تست دسترسی: {e}")
+
 async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """پردازش پست‌های کانال‌های سورس"""
     message = update.channel_post
@@ -145,6 +165,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
     
     # بررسی اینکه پیام از یکی از کانال‌های سورس مورد نظر است
     if source_channel_id not in SOURCE_CHANNELS:
+        logger.info(f"پیام از کانال ناشناخته {source_channel_id} دریافت شد (مورد انتظار: {SOURCE_CHANNELS})")
         return
     
     db = Database()
@@ -251,12 +272,19 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
     finally:
         db.close()
 
+async def post_init(application: Application):
+    """تابع اجرایی بعد از راه‌اندازی ربات"""
+    await test_channel_access(application)
+
 def main():
     """تابع اصلی"""
     application = Application.builder().token(BOT_TOKEN).build()
     
     # افزودن هندلر برای تمام کانال‌های سورس
     application.add_handler(MessageHandler(filters.Chat(SOURCE_CHANNELS), process_channel_post))
+    
+    # افزودن تابع post_init
+    application.post_init = post_init
     
     logger.info("🤖 ربات راه‌اندازی شد...")
     logger.info(f"📥 کانال‌های مبدأ: {SOURCE_CHANNELS}")
@@ -265,6 +293,7 @@ def main():
     logger.info("📋 قالب ثابت فوتر فعال شد")
     logger.info("⚠️ مدیریت طول متن فعال شد (حداکثر 1024 کاراکتر)")
     logger.info("🔄 پشتیبانی از چندین کانال سورس فعال شد")
+    logger.info("🔍 در حال تست دسترسی به کانال‌ها...")
     
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
