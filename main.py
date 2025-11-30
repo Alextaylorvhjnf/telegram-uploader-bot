@@ -112,9 +112,9 @@ def escape_html(text: str) -> str:
     return text
 
 def process_content(original_text: str, is_caption: bool = False) -> str:
-    """پردازش محتوا - فقط جایگزینی یوزرنیم و اضافه کردن فوتر"""
+    """پردازش محتوا - فقط جایگزینی یوزرنیم"""
     if not original_text:
-        return FOOTER_TEMPLATE
+        return ""
     
     logger.info(f"📨 پردازش محتوا (طول: {len(original_text)} کاراکتر)")
     
@@ -124,16 +124,8 @@ def process_content(original_text: str, is_caption: bool = False) -> str:
     # فرار کردن کاراکترهای HTML
     main_content = escape_html(main_content)
     
-    # ترکیب با فوتر جدید
-    final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
-    
-    # اگر کپشن است و طولانی شده، محتوای اصلی را حفظ کن و فوتر را حذف کن
-    if is_caption and len(final_content) > 1024:
-        logger.warning(f"⚠️ کپشن از 1024 کاراکتر بیشتر است، فقط محتوای اصلی ارسال می‌شود")
-        return main_content
-    
-    logger.info(f"✅ پردازش کامل شد (طول نهایی: {len(final_content)} کاراکتر)")
-    return final_content
+    logger.info(f"✅ پردازش کامل شد (طول نهایی: {len(main_content)} کاراکتر)")
+    return main_content
 
 async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """پردازش پست‌های کانال سورس"""
@@ -164,21 +156,24 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
         
         logger.info(f"📊 طول محتوای اصلی: {len(original_content)} کاراکتر")
         
-        # پردازش با در نظر گرفتن نوع محتوا
+        # پردازش ساده - فقط جایگزینی یوزرنیم
         processed_text = process_content(original_content, is_caption)
         
         # ارسال به کانال مقصد
         try:
             if message.text and not message.media:
+                # برای پیام متنی: محتوا + فوتر
+                final_text = f"{processed_text}\n\n{FOOTER_TEMPLATE}"
                 await context.bot.send_message(
                     chat_id=DESTINATION_CHANNEL_ID,
-                    text=processed_text,
+                    text=final_text,
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=False
                 )
                 logger.info("✅ پیام متنی ارسال شد")
             
             elif message.photo:
+                # برای عکس: فقط محتوای اصلی (بدون فوتر)
                 await context.bot.send_photo(
                     chat_id=DESTINATION_CHANNEL_ID,
                     photo=message.photo[-1].file_id,
@@ -188,6 +183,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
                 logger.info("✅ عکس با کپشن ارسال شد")
             
             elif message.video:
+                # برای ویدیو: فقط محتوای اصلی (بدون فوتر)
                 await context.bot.send_video(
                     chat_id=DESTINATION_CHANNEL_ID,
                     video=message.video.file_id,
@@ -197,6 +193,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
                 logger.info("✅ ویدیو با کپشن ارسال شد")
             
             elif message.document:
+                # برای فایل: فقط محتوای اصلی (بدون فوتر)
                 await context.bot.send_document(
                     chat_id=DESTINATION_CHANNEL_ID,
                     document=message.document.file_id,
@@ -206,9 +203,11 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
                 logger.info("✅ فایل با کپشن ارسال شد")
             
             else:
+                # برای سایر انواع: محتوا + فوتر
+                final_text = f"{processed_text}\n\n{FOOTER_TEMPLATE}"
                 await context.bot.send_message(
                     chat_id=DESTINATION_CHANNEL_ID,
-                    text=processed_text,
+                    text=final_text,
                     parse_mode=ParseMode.HTML
                 )
                 logger.info("✅ متن پردازش شده ارسال شد")
@@ -219,43 +218,34 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception as send_error:
             logger.error(f"❌ خطا در ارسال: {send_error}")
             
-            # تلاش برای ارسال فقط محتوای اصلی بدون فوتر
+            # تلاش برای ارسال فقط محتوای اصلی بدون HTML
             try:
-                logger.info("🔄 تلاش برای ارسال فقط محتوای اصلی...")
+                logger.info("🔄 تلاش برای ارسال بدون HTML...")
                 
                 simple_content = replace_usernames(original_content)
-                simple_content = escape_html(simple_content)
-                
-                # اگر هنوز طولانی است، کوتاه کن
-                if len(simple_content) > 1024:
-                    simple_content = simple_content[:1020] + "..."
                 
                 if message.photo:
                     await context.bot.send_photo(
                         chat_id=DESTINATION_CHANNEL_ID,
                         photo=message.photo[-1].file_id,
-                        caption=simple_content,
-                        parse_mode=ParseMode.HTML
+                        caption=simple_content
                     )
                 elif message.video:
                     await context.bot.send_video(
                         chat_id=DESTINATION_CHANNEL_ID,
                         video=message.video.file_id,
-                        caption=simple_content,
-                        parse_mode=ParseMode.HTML
+                        caption=simple_content
                     )
                 elif message.document:
                     await context.bot.send_document(
                         chat_id=DESTINATION_CHANNEL_ID,
                         document=message.document.file_id,
-                        caption=simple_content,
-                        parse_mode=ParseMode.HTML
+                        caption=simple_content
                     )
                 else:
                     await context.bot.send_message(
                         chat_id=DESTINATION_CHANNEL_ID,
-                        text=simple_content,
-                        parse_mode=ParseMode.HTML
+                        text=simple_content
                     )
                 
                 db.mark_message_processed(message.message_id)
@@ -279,8 +269,9 @@ def main():
     logger.info(f"📥 کانال مبدأ: {SOURCE_CHANNEL_ID}")
     logger.info(f"📤 کانال مقصد: {DESTINATION_CHANNEL_ID}")
     logger.info(f"🔁 جایگزینی یوزرنیم با: {REPLACEMENT_USERNAME}")
-    logger.info("📋 حالت ساده: کپی کامل محتوا + جایگزینی یوزرنیم")
-    logger.info("💡 اولویت با حفظ کامل محتوای اصلی از جمله خلاصه داستان")
+    logger.info("📋 حالت فوق ساده: کپی کامل تمام محتوا")
+    logger.info("💡 برای مدیاها: فقط محتوای اصلی (بدون فوتر)")
+    logger.info("💡 برای متن ساده: محتوای اصلی + فوتر")
     
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
