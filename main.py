@@ -2,14 +2,16 @@ import os
 import logging
 import sqlite3
 import re
+import asyncio
 from telegram import Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
+from telegram.constants import ChatType
 
 # ==================== تنظیمات مستقیم ====================
 BOT_TOKEN = "8379314037:AAEpz2EuVtkynaFqCi16bCJvRlMRnTr8K7w"
 SOURCE_CHANNELS = [
-    -1003319450332,  # کانال سورس اول
-    -1003442708764   # کانال سورس دوم
+    -1003442708764,  # کانال سورس اصلی (tebdgtdbd454)
+    -1003319450332   # کانال سورس دوم (اختیاری)
 ]
 DESTINATION_CHANNEL_ID = -1002061481133
 REPLACEMENT_USERNAME = "@apmovienet"
@@ -138,34 +140,34 @@ def process_content(original_text: str, is_caption: bool = False) -> str:
     logger.info(f"✅ محتوا پردازش شد (طول: {len(final_content)} کاراکتر)")
     return final_content
 
-async def test_channel_access(context: ContextTypes.DEFAULT_TYPE):
-    """تست دسترسی به کانال‌ها"""
-    try:
-        for channel_id in SOURCE_CHANNELS:
-            try:
-                chat = await context.bot.get_chat(channel_id)
-                logger.info(f"✅ دسترسی به کانال {channel_id} تأیید شد: {chat.title}")
-            except Exception as e:
-                logger.error(f"❌ خطا در دسترسی به کانال {channel_id}: {e}")
-        
-        # تست دسترسی به کانال مقصد
+async def join_public_channels(context: ContextTypes.DEFAULT_TYPE):
+    """عضویت خودکار در کانال‌های عمومی"""
+    for channel_id in SOURCE_CHANNELS:
         try:
-            dest_chat = await context.bot.get_chat(DESTINATION_CHANNEL_ID)
-            logger.info(f"✅ دسترسی به کانال مقصد تأیید شد: {dest_chat.title}")
-        except Exception as e:
-            logger.error(f"❌ خطا در دسترسی به کانال مقصد: {e}")
+            # دریافت اطلاعات کانال
+            chat = await context.bot.get_chat(channel_id)
+            logger.info(f"📋 اطلاعات کانال {channel_id}: {chat.title} ({chat.username})")
             
-    except Exception as e:
-        logger.error(f"❌ خطا در تست دسترسی: {e}")
+            # اگر کانال عمومی است و یوزرنیم دارد
+            if chat.username:
+                channel_username = f"@{chat.username}"
+                logger.info(f"🔗 کانال عمومی قابل دسترسی: {channel_username}")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ عدم دسترسی به کانال {channel_id}: {e}")
 
 async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """پردازش پست‌های کانال‌های سورس"""
+    # بررسی اینکه پیام از یک کانال است
+    if not update.channel_post:
+        return
+    
     message = update.channel_post
     source_channel_id = message.chat.id
     
     # بررسی اینکه پیام از یکی از کانال‌های سورس مورد نظر است
     if source_channel_id not in SOURCE_CHANNELS:
-        logger.info(f"پیام از کانال ناشناخته {source_channel_id} دریافت شد (مورد انتظار: {SOURCE_CHANNELS})")
+        logger.info(f"پیام از کانال ناشناخته {source_channel_id} دریافت شد")
         return
     
     db = Database()
@@ -226,6 +228,14 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             logger.info("✅ فایل با کپشن ارسال شد")
         
+        elif message.audio:
+            await context.bot.send_audio(
+                chat_id=DESTINATION_CHANNEL_ID,
+                audio=message.audio.file_id,
+                caption=processed_text
+            )
+            logger.info("✅ فایل صوتی با کپشن ارسال شد")
+        
         else:
             if processed_text:
                 await context.bot.send_message(
@@ -246,24 +256,24 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
                 await context.bot.send_photo(
                     chat_id=DESTINATION_CHANNEL_ID,
                     photo=message.photo[-1].file_id,
-                    caption="پست جدید - خطا در پردازش متن کامل"
+                    caption="پست جدید"
                 )
             elif message.video:
                 await context.bot.send_video(
                     chat_id=DESTINATION_CHANNEL_ID,
                     video=message.video.file_id,
-                    caption="پست جدید - خطا در پردازش متن کامل"
+                    caption="پست جدید"
                 )
             elif message.document:
                 await context.bot.send_document(
                     chat_id=DESTINATION_CHANNEL_ID,
                     document=message.document.file_id,
-                    caption="پست جدید - خطا در پردازش متن کامل"
+                    caption="پست جدید"
                 )
             else:
                 await context.bot.send_message(
                     chat_id=DESTINATION_CHANNEL_ID,
-                    text=FOOTER_TEMPLATE
+                    text="پست جدید"
                 )
             logger.info("✅ پست با متن جایگزین ارسال شد")
         except Exception as fallback_error:
@@ -274,14 +284,18 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def post_init(application: Application):
     """تابع اجرایی بعد از راه‌اندازی ربات"""
-    await test_channel_access(application)
+    await join_public_channels(application)
 
 def main():
     """تابع اصلی"""
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # افزودن هندلر برای تمام کانال‌های سورس
-    application.add_handler(MessageHandler(filters.Chat(SOURCE_CHANNELS), process_channel_post))
+    # افزودن هندلر برای تمام پیام‌های کانال
+    # این هندلر تمام پیام‌های کانال‌ها را دریافت می‌کند
+    application.add_handler(MessageHandler(
+        filters.ChatType.CHANNEL, 
+        process_channel_post
+    ))
     
     # افزودن تابع post_init
     application.post_init = post_init
@@ -293,7 +307,8 @@ def main():
     logger.info("📋 قالب ثابت فوتر فعال شد")
     logger.info("⚠️ مدیریت طول متن فعال شد (حداکثر 1024 کاراکتر)")
     logger.info("🔄 پشتیبانی از چندین کانال سورس فعال شد")
-    logger.info("🔍 در حال تست دسترسی به کانال‌ها...")
+    logger.info("🔓 ربات بدون نیاز به ادمین بودن کار می‌کند")
+    logger.info("🔍 در حال دریافت اطلاعات کانال‌ها...")
     
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
