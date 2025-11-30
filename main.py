@@ -75,10 +75,74 @@ def clean_caption(text):
     text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
     
     # حذف فضاهای اضافی و خطوط خالی
-    text = re.sub(r'\n\s*\n', '\n\n', text)  # جایگزینی خطوط خالی متعدد با یک خط خالی
+    text = re.sub(r'\n\s*\n', '\n\n', text)
     text = text.strip()
     
     return text
+
+async def send_media_with_caption(bot, chat_id, media_type, media_file_id, caption):
+    """
+    ارسال مدیا با کپشن - اگر کپشن طولانی باشد، آن را به بخش‌های مناسب تقسیم می‌کند
+    """
+    # حداکثر طول مجاز برای کپشن در تلگرام
+    MAX_CAPTION_LENGTH = 1024
+    
+    if len(caption) <= MAX_CAPTION_LENGTH:
+        # اگر کپشن کوتاه است، مستقیماً ارسال شود
+        if media_type == 'photo':
+            await bot.send_photo(
+                chat_id=chat_id,
+                photo=media_file_id,
+                caption=caption,
+                parse_mode=ParseMode.HTML
+            )
+        elif media_type == 'video':
+            await bot.send_video(
+                chat_id=chat_id,
+                video=media_file_id,
+                caption=caption,
+                parse_mode=ParseMode.HTML
+            )
+        elif media_type == 'document':
+            await bot.send_document(
+                chat_id=chat_id,
+                document=media_file_id,
+                caption=caption,
+                parse_mode=ParseMode.HTML
+            )
+        elif media_type == 'animation':
+            await bot.send_animation(
+                chat_id=chat_id,
+                animation=media_file_id,
+                caption=caption,
+                parse_mode=ParseMode.HTML
+            )
+    else:
+        # اگر کپشن طولانی است، ابتدا مدیا را بدون کپشن ارسال کرده
+        # سپس کپشن کامل را در پیام جداگانه ارسال می‌کنیم
+        if media_type == 'photo':
+            message = await bot.send_photo(
+                chat_id=chat_id,
+                photo=media_file_id
+            )
+        elif media_type == 'video':
+            message = await bot.send_video(
+                chat_id=chat_id,
+                video=media_file_id
+            )
+        elif media_type == 'document':
+            message = await bot.send_document(
+                chat_id=chat_id,
+                document=media_file_id
+            )
+        elif media_type == 'animation':
+            message = await bot.send_animation(
+                chat_id=chat_id,
+                animation=media_file_id
+            )
+        
+        # ارسال کپشن کامل به عنوان پاسخ به مدیا
+        await send_long_message(bot, chat_id, caption, message.message_id)
 
 async def send_long_message(bot, chat_id, text, reply_to_message_id=None):
     """
@@ -147,36 +211,39 @@ async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # اگر پست مدیا دارد
         if msg.photo:
-            # ارسال عکس با کپشن کامل
-            await context.bot.send_photo(
-                chat_id=DESTINATION_CHANNEL_ID,
-                photo=msg.photo[-1].file_id,
-                caption=final_text,
-                parse_mode=ParseMode.HTML
+            await send_media_with_caption(
+                context.bot,
+                DESTINATION_CHANNEL_ID,
+                'photo',
+                msg.photo[-1].file_id,
+                final_text
             )
             
         elif msg.video:
-            await context.bot.send_video(
-                chat_id=DESTINATION_CHANNEL_ID,
-                video=msg.video.file_id,
-                caption=final_text,
-                parse_mode=ParseMode.HTML
+            await send_media_with_caption(
+                context.bot,
+                DESTINATION_CHANNEL_ID,
+                'video',
+                msg.video.file_id,
+                final_text
             )
             
         elif msg.document:
-            await context.bot.send_document(
-                chat_id=DESTINATION_CHANNEL_ID,
-                document=msg.document.file_id,
-                caption=final_text,
-                parse_mode=ParseMode.HTML
+            await send_media_with_caption(
+                context.bot,
+                DESTINATION_CHANNEL_ID,
+                'document',
+                msg.document.file_id,
+                final_text
             )
             
         elif msg.animation:
-            await context.bot.send_animation(
-                chat_id=DESTINATION_CHANNEL_ID,
-                animation=msg.animation.file_id,
-                caption=final_text,
-                parse_mode=ParseMode.HTML
+            await send_media_with_caption(
+                context.bot,
+                DESTINATION_CHANNEL_ID,
+                'animation',
+                msg.animation.file_id,
+                final_text
             )
             
         else:
@@ -192,42 +259,6 @@ async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error(f"خطا در ارسال پست {msg.message_id}: {str(e)}")
-        
-        # تلاش برای ارسال بدون کپشن در صورت خطا
-        try:
-            if msg.photo:
-                await context.bot.send_photo(
-                    chat_id=DESTINATION_CHANNEL_ID,
-                    photo=msg.photo[-1].file_id
-                )
-            elif msg.video:
-                await context.bot.send_video(
-                    chat_id=DESTINATION_CHANNEL_ID,
-                    video=msg.video.file_id
-                )
-            elif msg.document:
-                await context.bot.send_document(
-                    chat_id=DESTINATION_CHANNEL_ID,
-                    document=msg.document.file_id
-                )
-            elif msg.animation:
-                await context.bot.send_animation(
-                    chat_id=DESTINATION_CHANNEL_ID,
-                    animation=msg.animation.file_id
-                )
-            
-            # ارسال متن به صورت جداگانه
-            await send_long_message(
-                context.bot, 
-                DESTINATION_CHANNEL_ID, 
-                final_text
-            )
-            
-            db.mark(msg.message_id)
-            logger.info(f"پست {msg.message_id} با روش جایگزین ارسال شد")
-            
-        except Exception as e2:
-            logger.error(f"خطا در ارسال جایگزین پست {msg.message_id}: {str(e2)}")
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
