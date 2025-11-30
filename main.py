@@ -111,8 +111,8 @@ def escape_html(text: str) -> str:
     
     return text
 
-def process_content(original_text: str) -> str:
-    """پردازش محتوا - فقط جایگزینی یوزرنیم و اضافه کردن فوتر"""
+def process_content(original_text: str, is_caption: bool = False) -> str:
+    """پردازش محتوا - فقط جایگزینی یوزرنیم و اضافه کردن فوتر با مدیریت طول"""
     if not original_text:
         return FOOTER_TEMPLATE
     
@@ -126,6 +126,23 @@ def process_content(original_text: str) -> str:
     
     # ترکیب با فوتر جدید
     final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
+    
+    # مدیریت طول برای کپشن (1024 کاراکتر محدودیت تلگرام)
+    if is_caption and len(final_content) > 1024:
+        logger.warning(f"⚠️ کپشن از 1024 کاراکتر بیشتر است: {len(final_content)}")
+        
+        # محاسبه فضای قابل استفاده برای محتوای اصلی
+        available_space = 1024 - len(FOOTER_TEMPLATE) - 10  # 10 برای فاصله
+        
+        if available_space > 100:  # حداقل فضای معقول برای محتوا
+            # کوتاه کردن محتوای اصلی
+            truncated_content = main_content[:available_space - 3] + "..."
+            final_content = f"{truncated_content}\n\n{FOOTER_TEMPLATE}"
+            logger.info(f"📏 کپشن کوتاه شد: {len(final_content)} کاراکتر")
+        else:
+            # اگر فضای کافی نیست، فقط فوتر را بفرست
+            final_content = FOOTER_TEMPLATE
+            logger.warning("❌ فضای کافی برای محتوای اصلی نیست، فقط فوتر ارسال می‌شود")
     
     logger.info(f"✅ پردازش کامل شد (طول نهایی: {len(final_content)} کاراکتر)")
     return final_content
@@ -147,17 +164,20 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
         
         # محتوای اصلی
         original_content = ""
+        is_caption = False
+        
         if message.text:
             original_content = message.text
             logger.info("📝 نوع: متن ساده")
         elif message.caption:
             original_content = message.caption
+            is_caption = True
             logger.info("📝 نوع: کپشن مدیا")
         
         logger.info(f"📊 طول محتوای اصلی: {len(original_content)} کاراکتر")
         
-        # پردازش ساده
-        processed_text = process_content(original_content)
+        # پردازش با در نظر گرفتن نوع محتوا
+        processed_text = process_content(original_content, is_caption)
         
         # ارسال به کانال مقصد
         try:
@@ -211,37 +231,56 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception as send_error:
             logger.error(f"❌ خطا در ارسال: {send_error}")
             
-            # تلاش برای ارسال بدون HTML در صورت خطا
+            # تلاش برای ارسال نسخه کوتاه‌شده
             try:
-                logger.info("🔄 تلاش برای ارسال بدون HTML...")
-                simple_text = replace_usernames(original_content) + "\n\n" + FOOTER_TEMPLATE
+                logger.info("🔄 تلاش برای ارسال نسخه کوتاه‌شده...")
+                
+                # محتوای بسیار کوتاه شده
+                short_content = original_content[:600] + "..." if len(original_content) > 600 else original_content
+                short_content = replace_usernames(short_content)
+                short_content = escape_html(short_content)
+                
+                # فوتر کوتاه‌شده
+                short_footer = """📅 Apmovie.net
+📱 <a href="https://dl.apmovie.net/APPS/Apmovie.apk">دانلود اپلیکیشن</a>
+🔗 <a href="https://t.me/apmovienet">@apmovienet</a>"""
+                
+                final_short = f"{short_content}\n\n{short_footer}"
+                
+                # بررسی طول نهایی
+                if len(final_short) > 1024:
+                    final_short = final_short[:1020] + "..."
                 
                 if message.photo:
                     await context.bot.send_photo(
                         chat_id=DESTINATION_CHANNEL_ID,
                         photo=message.photo[-1].file_id,
-                        caption=simple_text
+                        caption=final_short,
+                        parse_mode=ParseMode.HTML
                     )
                 elif message.video:
                     await context.bot.send_video(
                         chat_id=DESTINATION_CHANNEL_ID,
                         video=message.video.file_id,
-                        caption=simple_text
+                        caption=final_short,
+                        parse_mode=ParseMode.HTML
                     )
                 elif message.document:
                     await context.bot.send_document(
                         chat_id=DESTINATION_CHANNEL_ID,
                         document=message.document.file_id,
-                        caption=simple_text
+                        caption=final_short,
+                        parse_mode=ParseMode.HTML
                     )
                 else:
                     await context.bot.send_message(
                         chat_id=DESTINATION_CHANNEL_ID,
-                        text=simple_text
+                        text=final_short,
+                        parse_mode=ParseMode.HTML
                     )
                 
                 db.mark_message_processed(message.message_id)
-                logger.info("✅ پست با متن ساده ارسال شد")
+                logger.info("✅ پست با نسخه کوتاه‌شده ارسال شد")
                 
             except Exception as fallback_error:
                 logger.error(f"❌ خطا در ارسال پشتیبان: {fallback_error}")
@@ -262,7 +301,8 @@ def main():
     logger.info(f"📤 کانال مقصد: {DESTINATION_CHANNEL_ID}")
     logger.info(f"🔁 جایگزینی یوزرنیم با: {REPLACEMENT_USERNAME}")
     logger.info("📋 فوتر ثابت فعال شد")
-    logger.info("💡 حالت ساده: حفظ کامل فرمت اصلی + فقط جایگزینی یوزرنیم")
+    logger.info("💡 مدیریت طول کپشن فعال شد (حداکثر 1024 کاراکتر)")
+    logger.info("⚠️ در صورت نیاز، محتوای اصلی به صورت خودکار کوتاه می‌شود")
     
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
