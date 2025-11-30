@@ -6,38 +6,32 @@ from telegram import Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from telegram.constants import ParseMode
 
-# ==================== تنظیمات مستقیم ====================
+# ==================== تنظیمات ====================
 BOT_TOKEN = "8379314037:AAEpz2EuVtkynaFqCi16bCJvRlMRnTr8K7w"
 SOURCE_CHANNEL_ID = -1003319450332
 DESTINATION_CHANNEL_ID = -1002061481133
-REPLACEMENT_USERNAME = "@apmovienet"
 
-# ==================== قالب ثابت فوتر با لینک‌های HTML ====================
-FOOTER_TEMPLATE = """📅 تاریخ پخش:{2025/01/25}
-🌐 وبسایت و اپلیکیشن: Apmovie.net
+# فوتر ثابت (HTML)
+FOOTER_TEMPLATE = """🌟 اپی‌مووی | خانه سینما
 
-───────────────
-🌟 اپی‌مووی | خانه سینما
+📱 <a href="https://dl.apmovie.net/APPS/Apmovie.apk">دانلود اپلیکیشن اندروید موبایل</a>
 
-<a href="https://dl.apmovie.net/APPS/Apmovie.apk">📱 دانلود اپلیکیشن اندروید موبایل</a>
+🖥 <a href="https://dl.apmovie.net/APPS/Apmovie-TV.apk">دانلود اپلیکیشن اندروید تی‌وی</a>
 
-<a href="https://dl.apmovie.net/APPS/Apmovie-TV.apk">🖥 دانلود اپلیکیشن اندروید تی‌وی</a>
-
-🔴 برای ورود به اپلیکیشن ها نیازی به VPN نیست گرچه باز بودن آن هیچ مشکلی در کارکرد برنامه ها ایجاد نمیکند.
+🔴 برای ورود به اپلیکیشن ها نیازی به VPN نیست گرچه باز بودن آن هیچ مشکلی ایجاد نمیکند.
 
 ───────────────
-<a href="https://t.me/apmovienet">⚫️ @apmovienet</a> | اپی‌مووی فارسی
-<a href="https://t.me/PakhshinoTV">🟡 @PakhshinoTV</a> | کانال دوم
-<a href="https://t.me/apmovie_Support">🔵 @apmovie_Support</a> | پشتیبانی
-
+⚫️ <a href="https://t.me/apmovienet">@apmovienet</a> | اپی‌مووی فارسی
+🟡 <a href="https://t.me/PakhshinoTV">@PakhshinoTV</a> | کانال دوم
+🔵 <a href="https://t.me/apmovie_Support">@apmovie_Support</a> | پشتیبانی
 ───────────────
+
 🎧 پشتیبانی فارسی:
 در صورت نیاز به راهنمایی و پشتیبانی، از طریق کانال‌های بالا یا پشتیبانی اقدام کنید.
 
-🙏 از حمایت ارزشمند شما سپاسگزاریم 🌹
+🙏 از حمایت ارزشمند شما سپاسگزاریم
 🎥 با اپی‌مووی، دنیای سینما در دستان شماست."""
 
-# ==================== تنظیمات لاگ ====================
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -85,77 +79,232 @@ class Database:
     def close(self):
         self.conn.close()
 
-def replace_usernames(text: str) -> str:
-    """جایگزینی یوزرنیم‌ها"""
+def clean_caption_completely(text: str) -> str:
+    """
+    پاکسازی کامل کپشن:
+    - حذف تمام @username ها
+    - حذف تمام لینک‌های HTML و Markdown
+    - حذف تمام URL ها
+    - حذف تمام تگ‌ها و مشخصات کانال
+    - فقط متن اصلی فیلم و توضیحاتش باقی بماند
+    """
     if not text:
-        return text
+        return ""
     
-    username_pattern = r'@[a-zA-Z0-9_]{1,32}'
-    replaced_text = re.sub(username_pattern, REPLACEMENT_USERNAME, text)
+    # حذف تمام @username ها
+    text = re.sub(r'@\w+', '', text)
     
-    original_usernames = re.findall(username_pattern, text)
-    if original_usernames:
-        logger.info(f"تغییر {len(original_usernames)} یوزرنیم به {REPLACEMENT_USERNAME}")
+    # حذف تمام لینک‌های HTML (<a ...>...</a>) - فقط تگ حذف شود، متن داخلش باقی بماند
+    text = re.sub(r'<a[^>]*>', '', text)
+    text = re.sub(r'</a>', '', text)
     
-    return replaced_text
-
-def escape_html(text: str) -> str:
-    """فرار کردن کاراکترهای HTML برای جلوگیری از خطا"""
-    if not text:
-        return text
+    # حذف تمام لینک‌های Markdown [متن](لینک) - فقط ساختار لینک حذف شود، متن باقی بماند
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
     
-    # فرار کردن کاراکترهای خاص HTML
-    text = text.replace('&', '&amp;')
-    text = text.replace('<', '&lt;')
-    text = text.replace('>', '&gt;')
+    # حذف URL های مستقیم
+    text = re.sub(r'https?://\S+', '', text)
+    
+    # حذف هشتگ‌ها
+    text = re.sub(r'#\w+', '', text)
+    
+    # حذف متن‌های تبلیغاتی و مشخصات کانال
+    patterns_to_remove = [
+        r'کانال.*فیلم',
+        r'Channel.*Movie',
+        r'Download.*Film',
+        r'فیلم.*سینمایی',
+        r'Movie.*Channel',
+        r'Join.*Channel',
+        r'عضویت.*کانال',
+        r'Telegram.*Channel',
+        r'کانال.*تلگرام',
+        r'اشتراک.*کانال',
+        r'Subscribe.*Channel',
+    ]
+    
+    for pattern in patterns_to_remove:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+    
+    # تمیز کردن فضاهای اضافی و خطوط خالی
+    lines = text.split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        line = line.strip()
+        # حذف خطوط خالی و خطوطی که فقط شامل کاراکترهای خاص هستند
+        if line and not re.match(r'^[_\-\=\.\*~]+$', line):
+            cleaned_lines.append(line)
+    
+    text = '\n'.join(cleaned_lines)
+    
+    # حذف خطوط خالی متوالی
+    text = re.sub(r'\n\s*\n', '\n\n', text)
+    text = text.strip()
     
     return text
 
-def truncate_text(text: str, max_length: int = 900) -> str:
-    """کوتاه کردن متن اگر از حد مجاز بیشتر باشد"""
-    if len(text) <= max_length:
-        return text
-    
-    logger.warning(f"متن از {max_length} کاراکتر بیشتر است، در حال کوتاه کردن...")
-    return text[:max_length] + "..."
-
-def process_content(original_text: str, is_caption: bool = False) -> str:
+def process_content(original_text: str) -> str:
     """پردازش کامل محتوا و اضافه کردن فوتر ثابت"""
     if not original_text:
         return FOOTER_TEMPLATE
     
-    # جایگزینی یوزرنیم‌ها
-    main_content = replace_usernames(original_text)
+    # پاکسازی کامل کپشن - فقط مشخصات فیلم باقی بماند
+    main_content = clean_caption_completely(original_text)
     
-    # فرار کردن کاراکترهای HTML در محتوای اصلی
-    main_content = escape_html(main_content)
+    # اگر بعد از پاکسازی چیزی نماند، از متن اصلی استفاده کن (اما بدون تگ‌ها)
+    if not main_content.strip():
+        # حداقل پاکسازی برای حذف تگ‌ها
+        main_content = re.sub(r'@\w+', '', original_text)
+        main_content = re.sub(r'<a[^>]*>', '', main_content)
+        main_content = re.sub(r'</a>', '', main_content)
+        main_content = re.sub(r'https?://\S+', '', main_content)
+        main_content = main_content.strip()
     
-    # اگر کپشن است و متن اصلی خیلی طولانی است، آن را کوتاه کن
-    if is_caption:
-        main_content = truncate_text(main_content, 900)
-    
-    # ترکیب محتوای اصلی با فوتر جدید
-    final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
-    
-    # اگر بازهم طولانی است، کوتاه‌تر کن
-    if len(final_content) > 1024:
-        logger.warning("متن نهایی هنوز طولانی است، کوتاه کردن بیشتر...")
-        available_space = 1024 - len(FOOTER_TEMPLATE) - 50
-        if available_space > 100:
-            main_content = truncate_text(main_content, available_space)
-            final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
-        else:
-            final_content = FOOTER_TEMPLATE
+    # ترکیب محتوای اصلی با فوتر
+    if main_content.strip():
+        final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
+    else:
+        final_content = FOOTER_TEMPLATE
     
     logger.info(f"✅ محتوا پردازش شد (طول: {len(final_content)} کاراکتر)")
     return final_content
 
+async def send_with_proper_caption(context, message, processed_text):
+    """ارسال پیام با مدیریت صحیح کپشن"""
+    try:
+        # اگر کپشن کوتاه است (کمتر از 1024 کاراکتر)، مستقیماً ارسال کن
+        if len(processed_text) <= 1024:
+            if message.photo:
+                await context.bot.send_photo(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    photo=message.photo[-1].file_id,
+                    caption=processed_text,
+                    parse_mode=ParseMode.HTML
+                )
+            elif message.video:
+                await context.bot.send_video(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    video=message.video.file_id,
+                    caption=processed_text,
+                    parse_mode=ParseMode.HTML
+                )
+            elif message.document:
+                await context.bot.send_document(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    document=message.document.file_id,
+                    caption=processed_text,
+                    parse_mode=ParseMode.HTML
+                )
+            elif message.animation:
+                await context.bot.send_animation(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    animation=message.animation.file_id,
+                    caption=processed_text,
+                    parse_mode=ParseMode.HTML
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    text=processed_text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True
+                )
+        else:
+            # اگر کپشن طولانی است، ابتدا مدیا را بدون کپشن ارسال کن
+            if message.photo:
+                media_message = await context.bot.send_photo(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    photo=message.photo[-1].file_id
+                )
+            elif message.video:
+                media_message = await context.bot.send_video(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    video=message.video.file_id
+                )
+            elif message.document:
+                media_message = await context.bot.send_document(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    document=message.document.file_id
+                )
+            elif message.animation:
+                media_message = await context.bot.send_animation(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    animation=message.animation.file_id
+                )
+            else:
+                media_message = None
+            
+            # سپس کپشن کامل را به عنوان پیام جداگانه ارسال کن
+            if media_message:
+                await context.bot.send_message(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    text=processed_text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                    reply_to_message_id=media_message.message_id
+                )
+            else:
+                # برای پیام‌های متنی طولانی
+                if len(processed_text) <= 4096:
+                    await context.bot.send_message(
+                        chat_id=DESTINATION_CHANNEL_ID,
+                        text=processed_text,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True
+                    )
+                else:
+                    # تقسیم پیام طولانی
+                    parts = []
+                    current_part = ""
+                    
+                    for paragraph in processed_text.split('\n\n'):
+                        if len(current_part) + len(paragraph) + 2 <= 4096:
+                            if current_part:
+                                current_part += '\n\n' + paragraph
+                            else:
+                                current_part = paragraph
+                        else:
+                            if current_part:
+                                parts.append(current_part)
+                            current_part = paragraph
+                    
+                    if current_part:
+                        parts.append(current_part)
+                    
+                    first_message = None
+                    for i, part in enumerate(parts):
+                        if i == 0:
+                            first_message = await context.bot.send_message(
+                                chat_id=DESTINATION_CHANNEL_ID,
+                                text=part,
+                                parse_mode=ParseMode.HTML,
+                                disable_web_page_preview=True
+                            )
+                        else:
+                            await context.bot.send_message(
+                                chat_id=DESTINATION_CHANNEL_ID,
+                                text=part,
+                                parse_mode=ParseMode.HTML,
+                                disable_web_page_preview=True,
+                                reply_to_message_id=first_message.message_id
+                            )
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"خطا در ارسال پیام: {str(e)}")
+        return False
+
 async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """پردازش پست‌های کانال سورس"""
-    if update.channel_post.chat.id != SOURCE_CHANNEL_ID:
+    if not update.channel_post:
         return
     
     message = update.channel_post
+    
+    if message.chat.id != SOURCE_CHANNEL_ID:
+        return
+    
     db = Database()
     
     try:
@@ -165,125 +314,50 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
         
         logger.info(f"دریافت پیام جدید: {message.message_id}")
         
-        processed_text = None
-        is_caption = False
+        # دریافت متن اصلی
+        original_text = (message.caption or message.text or "").strip()
         
-        if message.text:
-            processed_text = process_content(message.text)
-            logger.info("📝 پردازش متن پیام")
-        elif message.caption:
-            processed_text = process_content(message.caption, is_caption=True)
-            is_caption = True
-            logger.info("📝 پردازش کپشن مدیا")
+        # پردازش محتوا
+        processed_text = process_content(original_text)
         
-        if not processed_text:
-            processed_text = FOOTER_TEMPLATE
+        # ارسال پیام
+        success = await send_with_proper_caption(context, message, processed_text)
         
-        # لاگ طول متن نهایی
-        logger.info(f"📏 طول متن نهایی: {len(processed_text)} کاراکتر")
-        
-        # ارسال به کانال مقصد با فرمت HTML
-        if message.text and not message.media:
-            await context.bot.send_message(
-                chat_id=DESTINATION_CHANNEL_ID,
-                text=processed_text,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=False
-            )
-            logger.info("✅ پیام متتی با لینک‌های HTML ارسال شد")
-        
-        elif message.photo:
-            await context.bot.send_photo(
-                chat_id=DESTINATION_CHANNEL_ID,
-                photo=message.photo[-1].file_id,
-                caption=processed_text,
-                parse_mode=ParseMode.HTML
-            )
-            logger.info("✅ عکس با کپشن و لینک‌های HTML ارسال شد")
-        
-        elif message.video:
-            await context.bot.send_video(
-                chat_id=DESTINATION_CHANNEL_ID,
-                video=message.video.file_id,
-                caption=processed_text,
-                parse_mode=ParseMode.HTML
-            )
-            logger.info("✅ ویدیو با کپشن و لینک‌های HTML ارسال شد")
-        
-        elif message.document:
-            await context.bot.send_document(
-                chat_id=DESTINATION_CHANNEL_ID,
-                document=message.document.file_id,
-                caption=processed_text,
-                parse_mode=ParseMode.HTML
-            )
-            logger.info("✅ فایل با کپشن و لینک‌های HTML ارسال شد")
-        
+        if success:
+            db.mark_message_processed(message.message_id)
+            logger.info(f"🎉 پیام {message.message_id} با موفقیت پردازش و ارسال شد")
         else:
-            if processed_text:
-                await context.bot.send_message(
-                    chat_id=DESTINATION_CHANNEL_ID,
-                    text=processed_text,
-                    parse_mode=ParseMode.HTML
-                )
-                logger.info("✅ متن پردازش شده با لینک‌های HTML ارسال شد")
-        
-        db.mark_message_processed(message.message_id)
-        logger.info(f"🎉 پیام {message.message_id} با موفقیت پردازش و ارسال شد")
+            logger.error(f"❌ خطا در ارسال پیام {message.message_id}")
         
     except Exception as e:
         logger.error(f"❌ خطا در پردازش پیام: {e}")
         
-        # تلاش برای ارسال بدون HTML در صورت خطا
+        # تلاش برای ارسال ساده‌تر در صورت خطا
         try:
-            # ایجاد نسخه ساده بدون HTML برای fallback
-            simple_footer = """📅 تاریخ پخش:{2025/01/25}
-🌐 وبسایت و اپلیکیشن: Apmovie.net
-
-───────────────
-🌟 اپی‌مووی | خانه سینما
-
-📱 دانلود اپلیکیشن اندروید موبایل
-🖥 دانلود اپلیکیشن اندروید تی‌وی
-
-🔴 برای ورود به اپلیکیشن ها نیازی به VPN نیست...
-
-───────────────
-⚫️ @apmovienet | اپی‌مووی فارسی
-🟡 @PakhshinoTV | کانال دوم
-🔵 @apmovie_Support | پشتیبانی
-
-───────────────
-🎧 پشتیبانی فارسی:
-در صورت نیاز به راهنمایی و پشتیبانی، از طریق کانال‌های بالا یا پشتیبانی اقدام کنید.
-
-🙏 از حمایت ارزشمند شما سپاسگزاریم 🌹
-🎥 با اپی‌مووی، دنیای سینما در دستان شماست."""
-            
             if message.photo:
                 await context.bot.send_photo(
                     chat_id=DESTINATION_CHANNEL_ID,
                     photo=message.photo[-1].file_id,
-                    caption=simple_footer
+                    caption=FOOTER_TEMPLATE,
+                    parse_mode=ParseMode.HTML
                 )
             elif message.video:
                 await context.bot.send_video(
                     chat_id=DESTINATION_CHANNEL_ID,
                     video=message.video.file_id,
-                    caption=simple_footer
-                )
-            elif message.document:
-                await context.bot.send_document(
-                    chat_id=DESTINATION_CHANNEL_ID,
-                    document=message.document.file_id,
-                    caption=simple_footer
+                    caption=FOOTER_TEMPLATE,
+                    parse_mode=ParseMode.HTML
                 )
             else:
                 await context.bot.send_message(
                     chat_id=DESTINATION_CHANNEL_ID,
-                    text=simple_footer
+                    text=FOOTER_TEMPLATE,
+                    parse_mode=ParseMode.HTML
                 )
-            logger.info("✅ پست با متن ساده ارسال شد")
+            
+            db.mark_message_processed(message.message_id)
+            logger.info("✅ پست با متن ساده‌تر ارسال شد")
+            
         except Exception as fallback_error:
             logger.error(f"❌ خطا در ارسال جایگزین: {fallback_error}")
     
@@ -293,15 +367,19 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
 def main():
     """تابع اصلی"""
     application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(MessageHandler(filters.Chat(SOURCE_CHANNEL_ID), process_channel_post))
+    
+    # استفاده از فیلتر مناسب
+    application.add_handler(MessageHandler(
+        filters.Chat(chat_id=SOURCE_CHANNEL_ID) & (filters.UpdateType.CHANNEL_POSTS),
+        process_channel_post
+    ))
     
     logger.info("🤖 ربات راه‌اندازی شد...")
     logger.info(f"📥 کانال مبدأ: {SOURCE_CHANNEL_ID}")
     logger.info(f"📤 کانال مقصد: {DESTINATION_CHANNEL_ID}")
-    logger.info(f"🔁 جایگزینی با: {REPLACEMENT_USERNAME}")
-    logger.info("📋 قالب ثابت فوتر با لینک‌های HTML فعال شد")
-    logger.info("⚠️ مدیریت طول متن فعال شد (حداکثر 1024 کاراکتر)")
-    logger.info("🔗 لینک‌های قابل کلیک فعال شدند")
+    logger.info("🔄 پاکسازی کامل کپشن‌ها فعال شد")
+    logger.info("📋 فوتر ثابت با لینک‌های HTML فعال شد")
+    logger.info("🎯 فقط مشخصات فیلم + فوتر اپی‌مووی نمایش داده می‌شود")
     
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
@@ -309,4 +387,4 @@ def main():
     )
 
 if __name__ == '__main__':
-    main() 
+    main()
