@@ -133,115 +133,34 @@ def clean_old_footer(content: str) -> str:
     return cleaned_content
 
 def extract_and_preserve_all_info(content: str) -> str:
-    """استخراج و حفظ تمام اطلاعات مهم شامل توضیحات، امتیاز، ژانر، مدت زمان و خلاصه داستان"""
+    """استخراج و حفظ تمام اطلاعات مهم - نسخه ساده‌شده"""
     if not content:
         return content
     
-    # کلمات کلیدی برای شناسایی تمام بخش‌های مهم
-    important_keywords = [
-        'دانلود فیلم', 'دانلود سریال',
-        '🏅امتیاز', '🎖امتیاز', '⭐امتیاز', '🌟امتیاز',
-        '📝 #', '🎙 #', '🔥با هنرنمایی', '🎭 با هنرنمایی',
-        '📤 کیفیت', '🎞 کیفیت', '📽 کیفیت',
-        '🔹ژانر', '🎭 ژانر', '📺 ژانر',
-        '⏰مدت زمان', '🕐 مدت زمان', '⏳ مدت زمان',
-        '👔کارگردان', '🎬 کارگردان', '📋 کارگردان',
-        '🌟ستارگان', '🎭 ستارگان', '👥 ستارگان',
-        '🌍محصول کشور', '🗺 محصول کشور', '🌎 محصول کشور',
-        '🎞خلاصه داستان', '🎬خلاصه فیلم', '📺خلاصه سریال',
-        'خلاصه داستان:', 'خلاصه فیلم:', 'خلاصه سریال:',
-        'خلاصه داستان', 'خلاصه فیلم', 'خلاصه سریال',
-        'داستان:', 'توضیحات:', '📖 خلاصه', '🎥 خلاصه'
-    ]
-    
-    lines = content.split('\n')
-    preserved_lines = []
-    found_important_section = False
-    
-    for line in lines:
-        line_stripped = line.strip()
-        
-        # اگر خط شامل کلمات کلیدی مهم باشد
-        if any(keyword in line for keyword in important_keywords):
-            found_important_section = True
-            preserved_lines.append(line)
-            continue
-        
-        # اگر در حال خواندن بخش مهم هستیم و خط خالی نیست، ادامه بده
-        if found_important_section and line_stripped:
-            preserved_lines.append(line)
-        elif found_important_section and not line_stripped:
-            # اگر خط خالی بعد از بخش مهم آمد، بررسی کن آیا بخش تمام شده
-            if preserved_lines and any(keyword in preserved_lines[-1] for keyword in ['خلاصه داستان', 'خلاصه فیلم', 'خلاصه سریال']):
-                # اگر خط قبل خلاصه بوده، خط خالی را نگه دار (ممکن است بخشی از خلاصه باشد)
-                preserved_lines.append(line)
-            else:
-                found_important_section = False
-        elif not found_important_section and line_stripped:
-            # خطوط دیگر که ممکن است حاوی اطلاعات مفید باشند را نیز حفظ کن
-            preserved_lines.append(line)
-    
-    # حذف خطوط خالی اضافی در انتها
-    while preserved_lines and not preserved_lines[-1].strip():
-        preserved_lines.pop()
-    
-    result = '\n'.join(preserved_lines)
-    
-    # اگر هیچ خطی حفظ نشد، کل محتوا را برگردان
-    if not result.strip():
-        return content
-    
-    return result
+    # ابتدا محتوای اصلی را برگردان (بدون هیچ فیلتری)
+    # فقط فوترهای قدیمی پاک شده‌اند
+    return content
 
 def smart_truncate_with_priority(content: str, max_length: int, is_caption: bool = False) -> str:
     """کوتاه کردن هوشمند متن با اولویت حفظ تمام اطلاعات مهم"""
     if len(content) <= max_length:
         return content
     
-    logger.warning(f"متن از {max_length} کاراکتر بیشتر است، در حال کوتاه کردن با حفظ اطلاعات مهم...")
+    logger.warning(f"متن از {max_length} کاراکتر بیشتر است، در حال کوتاه کردن...")
     
-    # ابتدا تمام اطلاعات مهم را استخراج کن
-    important_content = extract_and_preserve_all_info(content)
-    
-    # اگر محتوای مهم خودش از حد مجاز بیشتر است، آن را کوتاه کن
-    if len(important_content) > max_length:
-        logger.warning("محتوای مهم نیز طولانی است، کوتاه کردن نهایی...")
-        
-        # پیدا کردن خلاصه داستان برای اولویت بالاتر
-        summary_patterns = [
-            r'🎞خلاصه داستان:.*',
-            r'🎬خلاصه فیلم:.*',
-            r'📺خلاصه سریال:.*',
-            r'خلاصه داستان:.*',
-            r'خلاصه فیلم:.*',
-            r'خلاصه سریال:.*'
-        ]
-        
-        summary_match = None
-        for pattern in summary_patterns:
-            summary_match = re.search(pattern, important_content, re.DOTALL)
-            if summary_match:
-                break
-        
-        if summary_match:
-            summary_text = summary_match.group(0)
-            # پیدا کردن بخش قبل از خلاصه
-            before_summary = important_content[:summary_match.start()]
-            
-            # محاسبه فضای قابل استفاده
-            available_for_summary = max_length - len(before_summary) - 3
-            
-            if available_for_summary > 100:  # حداقل 100 کاراکتر برای خلاصه
-                truncated_summary = summary_text[:available_for_summary - 3] + "..."
-                return before_summary + truncated_summary
-            else:
-                # اگر فضای کافی نیست، فقط بخش قبل از خلاصه را نگه دار
-                return before_summary[:max_length - 3] + "..."
+    # اگر متن خیلی طولانی است، از انتها کوتاه کن اما اولویت با حفظ ابتدای متن است
+    # چون اطلاعات مهم در ابتدای متن هستند
+    if len(content) > max_length:
+        # حفظ 90% ابتدای متن و کوتاه کردن از انتها
+        preserve_length = int(max_length * 0.9)
+        if preserve_length > 100:
+            preserved_content = content[:preserve_length]
+            # اضافه کردن نشانه کوتاه‌شدن
+            return preserved_content + "..."
         else:
-            # اگر خلاصه پیدا نشد، کوتاه کردن از انتها
-            return important_content[:max_length - 3] + "..."
+            return content[:max_length - 3] + "..."
     
-    return important_content
+    return content
 
 def process_content(original_text: str, is_caption: bool = False) -> str:
     """پردازش کامل محتوا و اضافه کردن فوتر ثابت"""
@@ -260,13 +179,17 @@ def process_content(original_text: str, is_caption: bool = False) -> str:
     # اگر کپشن است، محتوای اصلی را با اولویت حفظ اطلاعات مهم کوتاه کن
     max_allowed = 1024 if is_caption else 4096
     
-    if len(main_content) + len(FOOTER_TEMPLATE) + 10 > max_allowed:
-        available_space = max_allowed - len(FOOTER_TEMPLATE) - 10
-        if available_space > 100:
-            main_content = smart_truncate_with_priority(main_content, available_space, is_caption)
-        else:
-            # اگر فضای کافی نیست، فقط فوتر را بفرست
-            return FOOTER_TEMPLATE
+    # محاسبه فضای قابل استفاده برای محتوای اصلی
+    available_space = max_allowed - len(FOOTER_TEMPLATE) - 10  # 10 برای فاصله و خطوط جدید
+    
+    if available_space < 100:  # اگر فضای کافی برای محتوای اصلی نیست
+        logger.warning("فضای کافی برای محتوای اصلی نیست، فقط فوتر ارسال می‌شود")
+        return FOOTER_TEMPLATE
+    
+    # اگر محتوای اصلی از فضای قابل استفاده بیشتر است، کوتاه کن
+    if len(main_content) > available_space:
+        logger.info(f"کوتاه کردن محتوا از {len(main_content)} به {available_space} کاراکتر")
+        main_content = smart_truncate_with_priority(main_content, available_space, is_caption)
     
     # ترکیب محتوای اصلی با فوتر جدید
     final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
@@ -274,6 +197,7 @@ def process_content(original_text: str, is_caption: bool = False) -> str:
     # بررسی نهایی طول
     if len(final_content) > max_allowed:
         logger.warning(f"متن نهایی هنوز از {max_allowed} کاراکتر بیشتر است، کوتاه کردن نهایی...")
+        # محاسبه مجدد فضای قابل استفاده
         available_space = max_allowed - len(FOOTER_TEMPLATE) - 10
         if available_space > 100:
             main_content = smart_truncate_with_priority(main_content, available_space, is_caption)
@@ -300,10 +224,13 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.info(f"📨 دریافت پیام جدید: {message.message_id}")
         
         # لاگ محتوای اصلی برای دیباگ
+        original_content = ""
         if message.text:
-            logger.info(f"📝 متن اصلی: {message.text[:200]}...")
+            original_content = message.text
+            logger.info(f"📝 متن اصلی ({len(original_content)} کاراکتر): {original_content[:300]}...")
         elif message.caption:
-            logger.info(f"📝 کپشن اصلی: {message.caption[:200]}...")
+            original_content = message.caption
+            logger.info(f"📝 کپشن اصلی ({len(original_content)} کاراکتر): {original_content[:300]}...")
         
         processed_text = None
         is_caption = False
@@ -323,8 +250,9 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.info(f"📏 طول متن نهایی: {len(processed_text)} کاراکتر")
         
         # ارسال به کانال مقصد با فرمت HTML
+        send_result = None
         if message.text and not message.media:
-            await context.bot.send_message(
+            send_result = await context.bot.send_message(
                 chat_id=DESTINATION_CHANNEL_ID,
                 text=processed_text,
                 parse_mode=ParseMode.HTML,
@@ -333,7 +261,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.info("✅ پیام متنی با لینک‌های HTML ارسال شد")
         
         elif message.photo:
-            await context.bot.send_photo(
+            send_result = await context.bot.send_photo(
                 chat_id=DESTINATION_CHANNEL_ID,
                 photo=message.photo[-1].file_id,
                 caption=processed_text,
@@ -342,7 +270,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.info("✅ عکس با کپشن و لینک‌های HTML ارسال شد")
         
         elif message.video:
-            await context.bot.send_video(
+            send_result = await context.bot.send_video(
                 chat_id=DESTINATION_CHANNEL_ID,
                 video=message.video.file_id,
                 caption=processed_text,
@@ -351,7 +279,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.info("✅ ویدیو با کپشن و لینک‌های HTML ارسال شد")
         
         elif message.document:
-            await context.bot.send_document(
+            send_result = await context.bot.send_document(
                 chat_id=DESTINATION_CHANNEL_ID,
                 document=message.document.file_id,
                 caption=processed_text,
@@ -361,64 +289,78 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
         
         else:
             if processed_text:
-                await context.bot.send_message(
+                send_result = await context.bot.send_message(
                     chat_id=DESTINATION_CHANNEL_ID,
                     text=processed_text,
                     parse_mode=ParseMode.HTML
                 )
                 logger.info("✅ متن پردازش شده با لینک‌های HTML ارسال شد")
         
-        db.mark_message_processed(message.message_id)
-        logger.info(f"🎉 پیام {message.message_id} با موفقیت پردازش و ارسال شد")
+        # اگر ارسال موفق بود، پیام را علامت‌گذاری کن
+        if send_result:
+            db.mark_message_processed(message.message_id)
+            logger.info(f"🎉 پیام {message.message_id} با موفقیت پردازش و ارسال شد")
+        else:
+            logger.error(f"❌ ارسال پیام {message.message_id} ناموفق بود")
         
     except Exception as e:
         logger.error(f"❌ خطا در پردازش پیام: {e}")
         
         # تلاش برای ارسال بسیار ساده در صورت خطا
         try:
-            # ایجاد محتوای بسیار کوتاه با حفظ اطلاعات مهم
+            logger.info("🔄 تلاش برای ارسال نسخه ساده...")
+            
+            # استفاده از محتوای اصلی بدون پردازش پیچیده
             simple_content = ""
             if message.text:
-                simple_content = replace_usernames(message.text)
+                simple_content = message.text
             elif message.caption:
-                simple_content = replace_usernames(message.caption)
+                simple_content = message.caption
             
-            # استخراج اطلاعات مهم برای نسخه ساده
-            important_simple = extract_and_preserve_all_info(simple_content)
-            if len(important_simple) > 500:
-                important_simple = important_simple[:497] + "..."
+            # فقط جایگزینی یوزرنیم‌ها
+            simple_content = replace_usernames(simple_content)
             
-            simple_footer = "📥 برای دریافت کامل به کانال مراجعه کنید: @apmovienet"
+            # اگر محتوا خیلی طولانی است، کوتاه کردن ساده
+            max_simple_length = 900 if (message.caption or message.photo or message.video) else 4000
+            if len(simple_content) > max_simple_length:
+                simple_content = simple_content[:max_simple_length - 100] + "\n\n...\n\n📥 ادامه مطلب در کانال اصلی"
             
-            if important_simple:
-                final_simple = f"{important_simple}\n\n{simple_footer}"
-            else:
-                final_simple = f"🎬 پست جدید\n\n{simple_footer}"
+            # ترکیب با فوتر
+            final_simple = f"{simple_content}\n\n{FOOTER_TEMPLATE}"
+            
+            # اگر هنوز طولانی است، فقط فوتر را بفرست
+            if len(final_simple) > max_simple_length:
+                final_simple = FOOTER_TEMPLATE
             
             if message.photo:
                 await context.bot.send_photo(
                     chat_id=DESTINATION_CHANNEL_ID,
                     photo=message.photo[-1].file_id,
-                    caption=final_simple
+                    caption=final_simple,
+                    parse_mode=ParseMode.HTML
                 )
             elif message.video:
                 await context.bot.send_video(
                     chat_id=DESTINATION_CHANNEL_ID,
                     video=message.video.file_id,
-                    caption=final_simple
+                    caption=final_simple,
+                    parse_mode=ParseMode.HTML
                 )
             elif message.document:
                 await context.bot.send_document(
                     chat_id=DESTINATION_CHANNEL_ID,
                     document=message.document.file_id,
-                    caption=final_simple
+                    caption=final_simple,
+                    parse_mode=ParseMode.HTML
                 )
             else:
                 await context.bot.send_message(
                     chat_id=DESTINATION_CHANNEL_ID,
-                    text=final_simple
+                    text=final_simple,
+                    parse_mode=ParseMode.HTML
                 )
-            logger.info("✅ پست با متن ساده و حفظ اطلاعات مهم ارسال شد")
+            logger.info("✅ پست با متن ساده ارسال شد")
+            db.mark_message_processed(message.message_id)
         except Exception as fallback_error:
             logger.error(f"❌ خطا در ارسال جایگزین: {fallback_error}")
     
@@ -437,8 +379,8 @@ def main():
     logger.info("📋 قالب ثابت فوتر با لینک‌های HTML فعال شد")
     logger.info("⚠️ مدیریت طول متن فعال شد (کپشن: 1024 کاراکتر، متن: 4096 کاراکتر)")
     logger.info("🔗 لینک‌های قابل کلیک فعال شدند")
-    logger.info("📖 حفظ کامل تمام اطلاعات مهم فعال شد")
-    logger.info("🎯 اولویت با حفظ: عنوان، امتیاز، ژانر، مدت زمان، کارگردان، ستارگان و خلاصه داستان")
+    logger.info("💡 حالت ساده: تمام توضیحات اصلی حفظ می‌شوند")
+    logger.info("🎯 الگوریتم جدید: اولویت با حفظ کامل محتوای اصلی")
     
     # راه‌اندازی با تنظیمات بهینه برای جلوگیری از Conflict
     application.run_polling(
