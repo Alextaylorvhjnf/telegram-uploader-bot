@@ -132,26 +132,95 @@ def clean_old_footer(content: str) -> str:
     
     return cleaned_content
 
-def smart_truncate(text: str, max_length: int = 700) -> str:
-    """کوتاه کردن هوشمند متن با حفظ بخش‌های مهم"""
+def extract_and_preserve_summary(content: str) -> str:
+    """استخراج و حفظ بخش‌های مهم شامل خلاصه داستان"""
+    if not content:
+        return content
+    
+    # پیدا کردن بخش‌های مهم شامل خلاصه داستان
+    summary_keywords = [
+        'خلاصه داستان:',
+        'خلاصه فیلم:',
+        'خلاصه سریال:',
+        'خلاصه داستان',
+        'خلاصه فیلم',
+        'خلاصه سریال',
+        'داستان:',
+        'توضیحات:',
+        '📖 خلاصه داستان',
+        '🎬 خلاصه فیلم',
+        '📺 خلاصه سریال'
+    ]
+    
+    lines = content.split('\n')
+    preserved_lines = []
+    found_summary = False
+    
+    for line in lines:
+        line_stripped = line.strip()
+        
+        # اگر خط با کلمات کلیدی خلاصه شروع شود، آن را حفظ کن
+        if any(line_stripped.startswith(keyword) for keyword in summary_keywords):
+            found_summary = True
+            preserved_lines.append(line)
+            continue
+        
+        # اگر در حال خواندن خلاصه هستیم و خط خالی نیست، ادامه بده
+        if found_summary and line_stripped:
+            preserved_lines.append(line)
+        elif found_summary and not line_stripped:
+            # اگر خط خالی بعد از خلاصه آمد، خلاصه تمام شده
+            found_summary = False
+            preserved_lines.append(line)
+        elif not found_summary:
+            # خطوط دیگر را نیز حفظ کن (عنوان، امتیاز، ژانر و ...)
+            preserved_lines.append(line)
+    
+    return '\n'.join(preserved_lines)
+
+def smart_truncate_with_summary(text: str, max_length: int, is_caption: bool = False) -> str:
+    """کوتاه کردن هوشمند متن با اولویت حفظ خلاصه داستان"""
     if len(text) <= max_length:
         return text
     
-    logger.warning(f"متن از {max_length} کاراکتر بیشتر است، در حال کوتاه کردن هوشمند...")
+    logger.warning(f"متن از {max_length} کاراکتر بیشتر است، در حال کوتاه کردن با حفظ خلاصه...")
     
-    # پیدا کردن آخرین نقطه یا خط جدید برای کوتاه کردن مناسب
-    if '.' in text[:max_length]:
-        last_dot = text[:max_length].rfind('.')
-        if last_dot > max_length * 0.7:  # اگر نقطه در 70% انتهایی باشد
-            return text[:last_dot + 1] + ".."
+    # ابتدا خلاصه داستان را استخراج کن
+    summary_content = extract_and_preserve_summary(text)
     
-    if '\n' in text[:max_length]:
-        last_newline = text[:max_length].rfind('\n')
-        if last_newline > max_length * 0.7:
-            return text[:last_newline] + "\n..."
+    # اگر خلاصه داستان خودش از حد مجاز بیشتر است، آن را کوتاه کن
+    if len(summary_content) > max_length:
+        logger.warning("خلاصه داستان نیز طولانی است، کوتاه کردن...")
+        # کوتاه کردن از انتهای خلاصه
+        return summary_content[:max_length - 3] + "..."
     
-    # کوتاه کردن ساده در صورت عدم پیدا کردن نقطه مناسب
-    return text[:max_length - 3] + "..."
+    # اگر خلاصه داستان در متن اصلی موجود است
+    summary_keywords = ['خلاصه داستان:', 'خلاصه فیلم:', 'خلاصه سریال:']
+    summary_start = -1
+    
+    for keyword in summary_keywords:
+        summary_start = text.find(keyword)
+        if summary_start != -1:
+            break
+    
+    if summary_start != -1:
+        # بخش قبل از خلاصه و خود خلاصه را جدا کن
+        before_summary = text[:summary_start]
+        summary_section = text[summary_start:]
+        
+        # فضای قابل استفاده برای بخش قبل از خلاصه
+        available_space = max_length - len(summary_section) - 3
+        
+        if available_space > 50:  # حداقل 50 کاراکتر برای بخش قبل از خلاصه
+            # کوتاه کردن بخش قبل از خلاصه
+            before_summary_short = before_summary[:available_space] + "..."
+            return before_summary_short + summary_section
+        else:
+            # اگر فضای کافی نیست، فقط خلاصه را نگه دار
+            return summary_section[:max_length - 3] + "..."
+    else:
+        # اگر خلاصه پیدا نشد، کوتاه کردن عادی
+        return text[:max_length - 3] + "..."
 
 def process_content(original_text: str, is_caption: bool = False) -> str:
     """پردازش کامل محتوا و اضافه کردن فوتر ثابت"""
@@ -167,30 +236,28 @@ def process_content(original_text: str, is_caption: bool = False) -> str:
     # فرار کردن کاراکترهای HTML در محتوای اصلی
     main_content = escape_html(main_content)
     
-    # اگر کپشن است، محتوای اصلی را به شدت کوتاه کن
-    if is_caption:
-        main_content = smart_truncate(main_content, 700)  # فضای بسیار کم برای کپشن
+    # اگر کپشن است، محتوای اصلی را با اولویت حفظ خلاصه کوتاه کن
+    max_allowed = 1024 if is_caption else 4096
+    
+    if len(main_content) + len(FOOTER_TEMPLATE) + 10 > max_allowed:
+        available_space = max_allowed - len(FOOTER_TEMPLATE) - 10
+        if available_space > 100:
+            main_content = smart_truncate_with_summary(main_content, available_space, is_caption)
+        else:
+            # اگر فضای کافی نیست، فقط فوتر را بفرست
+            return FOOTER_TEMPLATE
     
     # ترکیب محتوای اصلی با فوتر جدید
     final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
     
-    # بررسی طول نهایی - برای کپشن حداکثر 1024 کاراکتر
-    max_allowed = 1024 if is_caption else 4096
-    
+    # بررسی نهایی طول
     if len(final_content) > max_allowed:
-        logger.warning(f"متن نهایی از {max_allowed} کاراکتر بیشتر است، کوتاه کردن بیشتر...")
-        
-        # محاسبه فضای قابل استفاده برای محتوای اصلی
-        available_space = max_allowed - len(FOOTER_TEMPLATE) - 20
-        
-        if available_space > 100:  # حداقل 100 کاراکتر برای محتوای اصلی
-            if is_caption:
-                main_content = smart_truncate(main_content, available_space)
-            else:
-                main_content = main_content[:available_space] + "..."
+        logger.warning(f"متن نهایی هنوز از {max_allowed} کاراکتر بیشتر است، کوتاه کردن نهایی...")
+        available_space = max_allowed - len(FOOTER_TEMPLATE) - 10
+        if available_space > 100:
+            main_content = smart_truncate_with_summary(main_content, available_space, is_caption)
             final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
         else:
-            # اگر فضای کافی نیست، فقط فوتر را بفرست
             final_content = FOOTER_TEMPLATE
     
     logger.info(f"✅ محتوا پردازش شد (طول: {len(final_content)} کاراکتر - حداکثر مجاز: {max_allowed})")
@@ -282,30 +349,49 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
         
         # تلاش برای ارسال بسیار ساده در صورت خطا
         try:
+            # ایجاد محتوای بسیار کوتاه با حفظ خلاصه
+            simple_content = ""
+            if message.text:
+                simple_content = replace_usernames(message.text)
+            elif message.caption:
+                simple_content = replace_usernames(message.caption)
+            
+            # استخراج خلاصه برای نسخه ساده
+            summary_simple = extract_and_preserve_summary(simple_content)
+            if len(summary_simple) > 500:
+                summary_simple = summary_simple[:497] + "..."
+            
+            simple_footer = "📥 برای دریافت کامل به کانال مراجعه کنید: @apmovienet"
+            
+            if summary_simple:
+                final_simple = f"{summary_simple}\n\n{simple_footer}"
+            else:
+                final_simple = f"🎬 پست جدید\n\n{simple_footer}"
+            
             if message.photo:
                 await context.bot.send_photo(
                     chat_id=DESTINATION_CHANNEL_ID,
                     photo=message.photo[-1].file_id,
-                    caption="🎬 پست جدید\n\n📥 برای دریافت به کانال مراجعه کنید: @apmovienet"
+                    caption=final_simple
                 )
             elif message.video:
                 await context.bot.send_video(
                     chat_id=DESTINATION_CHANNEL_ID,
                     video=message.video.file_id,
-                    caption="🎬 پست جدید\n\n📥 برای دریافت به کانال مراجعه کنید: @apmovienet"
+                    caption=final_simple
                 )
             elif message.document:
                 await context.bot.send_document(
                     chat_id=DESTINATION_CHANNEL_ID,
                     document=message.document.file_id,
-                    caption="🎬 پست جدید\n\n📥 برای دریافت به کانال مراجعه کنید: @apmovienet"
+                    caption=final_simple
                 )
             else:
                 await context.bot.send_message(
                     chat_id=DESTINATION_CHANNEL_ID,
-                    text="🎬 پست جدید\n\n📥 برای دریافت به کانال مراجعه کنید: @apmovienet"
+                    text=final_simple
                 )
-            logger.info("✅ پست با متن بسیار کوتاه ارسال شد")
+            logger.info("✅ پست با متن ساده و حفظ خلاصه ارسال شد")
         except Exception as fallback_error:
             logger.error(f"❌ خطا در ارسال جایگزین: {fallback_error}")
     
@@ -324,7 +410,8 @@ def main():
     logger.info("📋 قالب ثابت فوتر با لینک‌های HTML فعال شد")
     logger.info("⚠️ مدیریت طول متن فعال شد (کپشن: 1024 کاراکتر، متن: 4096 کاراکتر)")
     logger.info("🔗 لینک‌های قابل کلیک فعال شدند")
-    logger.info("📖 حفظ کامل محتوای اصلی فعال شد")
+    logger.info("📖 حفظ کامل توضیحات و خلاصه داستان فعال شد")
+    logger.info("🎯 اولویت با حفظ خلاصه داستان، خلاصه فیلم و خلاصه سریال")
     
     # راه‌اندازی با تنظیمات بهینه برای جلوگیری از Conflict
     application.run_polling(
