@@ -1,184 +1,208 @@
-import os
-import asyncio
 import logging
-from telethon import TelegramClient, events
-from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
+import sqlite3
+import re
+from telegram import Update
+from telegram.ext import Application, ContextTypes, MessageHandler, filters
+from telegram.constants import ParseMode
 
-# ==================== تنظیمات از Environment Variables ====================
-API_ID = int(os.getenv('API_ID', 0))
-API_HASH = os.getenv('API_HASH', '')
-BOT_TOKEN = os.getenv('BOT_TOKEN', '')
-SOURCE_CHANNEL = int(os.getenv('SOURCE_CHANNEL', 0))
-DESTINATION_CHANNEL = int(os.getenv('DESTINATION_CHANNEL', 0))
-ADMIN_ID = int(os.getenv('ADMIN_ID', 0))
-
-# ==================== جایگزینی‌های مورد نظر ====================
-REPLACEMENTS = {
-    '@neterplay': '@apmovienet',
-    '@neterplay_Site': '@apmovienet',
-    '@Oxy_Address': '@apmovienet',
-    'neterplay.com': 'apmovienet.com',  # اگر دامنه هم می‌خوای عوض کنی
-    '⚫️ @neterplay': '⚫️ @apmovienet',
-    '🔴 @neterplay': '🔴 @apmovienet', 
-    '🟡 @neterplay_Site': '🟡 @apmovienet',
-    '🟢 @Oxy_Address': '🟢 @apmovienet',
-    'Neterplay': 'AP Movie',
-    'neterplay': 'apmovienet'
-}
+# ==================== تنظیمات ربات ====================
+BOT_TOKEN = "8379314037:AAEpz2EuVtkynaFqCi16bCJvRlMRnTr8K7w"
+SOURCE_CHANNEL_ID = -1003319450332  # کانال سورس
+DESTINATION_CHANNEL_ID = -1002061481133  # کانال مقصد
+REPLACEMENT_USERNAME = "@apmovienet"  # یوزرنیم ثابت برای جایگزینی
 
 # ==================== تنظیمات لاگ ====================
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# ==================== کلاینت تلگرام ====================
-client = TelegramClient('railway_bot', API_ID, API_HASH)
+# ==================== دیتابیس ====================
+class Database:
+    def __init__(self):
+        self.conn = sqlite3.connect('processed_messages.db', check_same_thread=False)
+        self.create_table()
+    
+    def create_table(self):
+        """ایجاد جدول برای ذخیره پیام‌های پردازش شده"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS processed_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id INTEGER UNIQUE,
+                source_channel_id INTEGER,
+                processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        self.conn.commit()
+    
+    def is_message_processed(self, message_id: int) -> bool:
+        """بررسی اینکه آیا پیام قبلاً پردازش شده است"""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            'SELECT 1 FROM processed_messages WHERE message_id = ? AND source_channel_id = ?',
+            (message_id, SOURCE_CHANNEL_ID)
+        )
+        return cursor.fetchone() is not None
+    
+    def mark_message_processed(self, message_id: int):
+        """علامت گذاری پیام به عنوان پردازش شده"""
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(
+                'INSERT INTO processed_messages (message_id, source_channel_id) VALUES (?, ?)',
+                (message_id, SOURCE_CHANNEL_ID)
+            )
+            self.conn.commit()
+        except sqlite3.IntegrityError:
+            pass  # پیام قبلاً پردازش شده
+    
+    def close(self):
+        """بستن اتصال دیتابیس"""
+        self.conn.close()
 
-def replace_content(text):
-    """جایگزینی محتوا بر اساس دیکشنری REPLACEMENTS"""
+# ==================== پردازش متن ====================
+def replace_usernames(text: str) -> str:
+    """
+    جایگزینی تمام یوزرنیم‌های @ با مقدار ثابت
+    """
     if not text:
         return text
     
-    original_text = text
-    for old_text, new_text in REPLACEMENTS.items():
-        text = text.replace(old_text, new_text)
+    # الگو برای پیدا کردن یوزرنیم‌های تلگرام
+    username_pattern = r'@[a-zA-Z0-9_]{5,32}'
+    
+    # جایگزینی همه یوزرنیم‌ها
+    replaced_text = re.sub(username_pattern, REPLACEMENT_USERNAME, text)
     
     # لاگ تغییرات
-    if text != original_text:
-        logger.info("✅ متن با موفقیت ویرایش شد")
-        logger.info(f"📝 تغییرات: {len(REPLACEMENTS)} جایگزینی انجام شد")
+    original_usernames = re.findall(username_pattern, text)
+    if original_usernames:
+        logger.info(f"🔁 جایگزینی {len(original_usernames)} یوزرنیم: {original_usernames} -> {REPLACEMENT_USERNAME}")
     
-    return text
+    return replaced_text
 
-async def send_notification(message):
-    """ارسال نوتیفیکیشن به ادمین"""
+# ==================== پردازش پیام ====================
+async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """پردازش پست‌های کانال سورس"""
+    
+    # اطمینان از اینکه پیام از کانال سورس است
+    if update.channel_post.chat.id != SOURCE_CHANNEL_ID:
+        return
+    
+    message = update.channel_post
+    db = Database()
+    
     try:
-        await client.send_message(
-            ADMIN_ID,
-            f"🤖 ربات فعال شد!\n\n{message}"
-        )
-    except Exception as e:
-        logger.error(f"خطا در ارسال نوتیفیکیشن: {e}")
-
-async def process_and_forward(message):
-    """پردازش و ارسال پیام"""
-    try:
-        logger.info(f"📨 پیام جدید دریافت شد: {message.id}")
-        
-        # پردازش متن و کپشن
-        new_text = None
-        new_caption = None
-        
-        if message.text:
-            new_text = replace_content(message.text)
-        
-        if message.message:
-            new_caption = replace_content(message.message)
-        
-        # اگر پیام فقط متن باشد
-        if not message.media and (new_text or new_caption):
-            content_to_send = new_text if new_text else new_caption
-            await client.send_message(DESTINATION_CHANNEL, content_to_send)
-            logger.info("✅ پیام متنی ارسال شد")
-        
-        # اگر پیام دارای مدیا باشد
-        elif message.media:
-            if isinstance(message.media, (MessageMediaPhoto, MessageMediaDocument)):
-                # ارسال مدیا با کپشن جدید
-                await client.send_file(
-                    DESTINATION_CHANNEL,
-                    message.media,
-                    caption=new_caption
-                )
-                logger.info("✅ مدیا با کپشن ویرایش شده ارسال شد")
-            else:
-                # برای انواع دیگر مدیا
-                await client.send_message(
-                    DESTINATION_CHANNEL,
-                    new_text if new_text else "پیام جدید",
-                    file=message.media
-                )
-                logger.info("✅ پیام با مدیا ارسال شد")
-        
-        # ارسال تأیید به ادمین
-        try:
-            await client.send_message(
-                ADMIN_ID,
-                f"✅ پست جدید با موفقیت پردازش و ارسال شد!\n\nآیدی پست: {message.id}"
-            )
-        except:
-            pass
-            
-        logger.info("✅ پیام با موفقیت پردازش و ارسال شد")
-        
-    except Exception as e:
-        logger.error(f"❌ خطا در پردازش پیام: {e}")
-        try:
-            await client.send_message(
-                ADMIN_ID, 
-                f"❌ خطا در پردازش پیام: {str(e)[:200]}..."
-            )
-        except:
-            pass
-
-@client.on(events.NewMessage(chats=SOURCE_CHANNEL))
-async def handler(event):
-    """هندلر پیام‌های جدید"""
-    await process_and_forward(event.message)
-
-async def main():
-    """تابع اصلی"""
-    try:
-        await client.start(bot_token=BOT_TOKEN)
-        
-        # چک کردن اتصال
-        me = await client.get_me()
-        logger.info(f"🤖 ربات با نام @{me.username} راه‌اندازی شد")
-        
-        # چک کردن دسترسی به کانال‌ها
-        try:
-            source_entity = await client.get_entity(SOURCE_CHANNEL)
-            dest_entity = await client.get_entity(DESTINATION_CHANNEL)
-            logger.info(f"✅ اتصال به کانال‌ها تأیید شد")
-            logger.info(f"📥 کانال مبدأ: {source_entity.title}")
-            logger.info(f"📤 کانال مقصد: {dest_entity.title}")
-        except Exception as e:
-            logger.error(f"❌ خطا در اتصال به کانال‌ها: {e}")
-            await client.send_message(ADMIN_ID, f"❌ خطا در اتصال به کانال‌ها: {e}")
+        # بررسی تکراری نبودن پیام
+        if db.is_message_processed(message.message_id):
+            logger.info(f"⏭️ پیام {message.message_id} قبلاً پردازش شده است")
             return
         
-        # ارسال نوتیفیکیشن شروع به کار
-        await send_notification(
-            "ربات اتوماسیون محتوا فعال شد! 🎬\n\n"
-            "📋 کارهایی که انجام می‌دهد:\n"
-            "• مانیتورینگ اتوماتیک کانال مبدأ\n"
-            "• جایگزینی آیدی‌ها با @apmovienet\n"
-            "• ارسال خودکار به کانال مقصد\n"
-            "• ارسال نوتیفیکیشن به شما\n\n"
-            "🟢 ربات آماده کار است!"
-        )
+        logger.info(f"📨 دریافت پیام جدید: {message.message_id}")
         
-        logger.info("🟢 ربات آماده کار است و در حال مانیتورینگ...")
-        await client.run_until_disconnected()
+        # پردازش متن/کپشن
+        processed_text = None
+        if message.text:
+            processed_text = replace_usernames(message.text)
+        elif message.caption:
+            processed_text = replace_usernames(message.caption)
+        
+        # ارسال به کانال مقصد بر اساس نوع محتوا
+        if message.text and not message.media:
+            # پیام متنی ساده
+            await context.bot.send_message(
+                chat_id=DESTINATION_CHANNEL_ID,
+                text=processed_text,
+                parse_mode=ParseMode.HTML if message.entities else None
+            )
+            logger.info("✅ پیام متنی ارسال شد")
+        
+        elif message.photo:
+            # پیام با عکس
+            await context.bot.send_photo(
+                chat_id=DESTINATION_CHANNEL_ID,
+                photo=message.photo[-1].file_id,  # بزرگترین سایز عکس
+                caption=processed_text,
+                parse_mode=ParseMode.HTML if message.caption_entities else None
+            )
+            logger.info("✅ عکس با کپشن ارسال شد")
+        
+        elif message.video:
+            # پیام با ویدیو
+            await context.bot.send_video(
+                chat_id=DESTINATION_CHANNEL_ID,
+                video=message.video.file_id,
+                caption=processed_text,
+                parse_mode=ParseMode.HTML if message.caption_entities else None
+            )
+            logger.info("✅ ویدیو با کپشن ارسال شد")
+        
+        elif message.document:
+            # پیام با فایل
+            await context.bot.send_document(
+                chat_id=DESTINATION_CHANNEL_ID,
+                document=message.document.file_id,
+                caption=processed_text,
+                parse_mode=ParseMode.HTML if message.caption_entities else None
+            )
+            logger.info("✅ فایل با کپشن ارسال شد")
+        
+        elif message.audio:
+            # پیام با audio
+            await context.bot.send_audio(
+                chat_id=DESTINATION_CHANNEL_ID,
+                audio=message.audio.file_id,
+                caption=processed_text,
+                parse_mode=ParseMode.HTML if message.caption_entities else None
+            )
+            logger.info("✅ audio با کپشن ارسال شد")
+        
+        else:
+            # انواع دیگر پیام
+            if processed_text:
+                await context.bot.send_message(
+                    chat_id=DESTINATION_CHANNEL_ID,
+                    text=processed_text
+                )
+                logger.info("✅ متن پردازش شده ارسال شد")
+            else:
+                logger.warning("⚠️ نوع پیام پشتیبانی نمی‌شود")
+                return
+        
+        # علامت گذاری پیام به عنوان پردازش شده
+        db.mark_message_processed(message.message_id)
+        logger.info(f"✅ پیام {message.message_id} با موفقیت پردازش و ارسال شد")
         
     except Exception as e:
-        logger.error(f"❌ خطای جدی در ربات: {e}")
-        try:
-            await client.send_message(ADMIN_ID, f"❌ ربات متوقف شد: {e}")
-        except:
-            pass
-
-if __name__ == '__main__':
-    # چک کردن وجود تمام متغیرهای محیطی
-    required_vars = ['API_ID', 'API_HASH', 'BOT_TOKEN', 'SOURCE_CHANNEL', 'DESTINATION_CHANNEL', 'ADMIN_ID']
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
+        logger.error(f"❌ خطا در پردازش پیام {message.message_id}: {str(e)}")
     
-    if missing_vars:
-        logger.error(f"❌ متغیرهای محیطی زیر تنظیم نشده‌اند: {missing_vars}")
-        exit(1)
+    finally:
+        db.close()
+
+# ==================== راه‌اندازی ربات ====================
+async def main():
+    """تابع اصلی راه‌اندازی ربات"""
+    
+    # ایجاد اپلیکیشن
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # افزودن هندلر برای پست‌های کانال
+    application.add_handler(MessageHandler(filters.Chat(SOURCE_CHANNEL_ID), process_channel_post))
     
     # راه‌اندازی ربات
-    logger.info("🚀 در حال راه‌اندازی ربات...")
-    client.loop.run_until_complete(main())
+    logger.info("🤖 ربات در حال راه‌اندازی...")
+    logger.info(f"📥 کانال سورس: {SOURCE_CHANNEL_ID}")
+    logger.info(f"📤 کانال مقصد: {DESTINATION_CHANNEL_ID}")
+    logger.info(f"🔁 جایگزینی یوزرنیم‌ها با: {REPLACEMENT_USERNAME}")
+    
+    # شروع polling
+    await application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True
+    )
+
+if __name__ == '__main__':
+    import asyncio
+    asyncio.run(main())
