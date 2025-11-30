@@ -8,10 +8,10 @@ from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from telegram.constants import ParseMode
 
 # ==================== تنظیمات از Environment Variables ====================
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-SOURCE_CHANNEL_ID = int(os.getenv('SOURCE_CHANNEL_ID'))
-DESTINATION_CHANNEL_ID = int(os.getenv('DESTINATION_CHANNEL_ID'))
-REPLACEMENT_USERNAME = os.getenv('REPLACEMENT_USERNAME', '@apmovienet')
+BOT_TOKEN = "8379314037:AAEpz2EuVtkynaFqCi16bCJvRlMRnTr8K7w"
+SOURCE_CHANNEL_ID = -1003319450332  # کانال سورس
+DESTINATION_CHANNEL_ID = -1002061481133  # کانال مقصد
+REPLACEMENT_USERNAME = "@apmovienet"  # یوزرنیم ثابت برای جایگزینی
 
 # ==================== قالب ثابت فوتر ====================
 FOOTER_TEMPLATE = """📅 تاریخ پخش: {release_date}
