@@ -12,8 +12,7 @@ SOURCE_CHANNEL_ID = -1003319450332
 DESTINATION_CHANNEL_ID = -1002061481133
 
 # فوتر ثابت (HTML)
-FOOTER_TEMPLATE = """
-🌟 اپی‌مووی | خانه سینما
+FOOTER_TEMPLATE = """🌟 اپی‌مووی | خانه سینما
 
 📱 <a href="https://dl.apmovie.net/APPS/Apmovie.apk">دانلود اپلیکیشن اندروید موبایل</a>
 
@@ -31,8 +30,7 @@ FOOTER_TEMPLATE = """
 در صورت نیاز به راهنمایی و پشتیبانی، از طریق کانال‌های بالا یا پشتیبانی اقدام کنید.
 
 🙏 از حمایت ارزشمند شما سپاسگزاریم
-🎥 با اپی‌مووی، دنیای سینما در دستان شماست.
-"""
+🎥 با اپی‌مووی، دنیای سینما در دستان شماست."""
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -56,10 +54,11 @@ db = DB()
 
 def clean_caption(text):
     """
-    پاکسازی کپشن:
-    1. حذف تمام @username ها
-    2. حذف تمام لینک‌های HTML و Markdown (فقط تگ حذف شود، متن باقی بماند)
-    3. حفظ 100% متن اصلی غیرلینک
+    پاکسازی کامل کپشن:
+    - حذف تمام @username ها
+    - حذف تمام لینک‌های HTML و Markdown
+    - حذف تمام تگ‌ها و مشخصات کانال اصلی
+    - فقط متن اصلی فیلم و توضیحاتش باقی بماند
     """
     if not text:
         return text
@@ -67,14 +66,49 @@ def clean_caption(text):
     # حذف تمام @username ها
     text = re.sub(r'@\w+', '', text)
     
-    # حذف لینک‌های HTML (<a ...>...</a>) - فقط تگ حذف شود، متن داخلش باقی بماند
-    text = re.sub(r'<a[^>]*>', '', text)  # حذف تگ شروع
-    text = re.sub(r'</a>', '', text)       # حذف تگ پایان
+    # حذف تمام لینک‌های HTML (<a ...>...</a>)
+    text = re.sub(r'<a[^>]*>', '', text)
+    text = re.sub(r'</a>', '', text)
     
-    # حذف لینک‌های Markdown [متن](لینک) - فقط ساختار لینک حذف شود، متن باقی بماند
+    # حذف تمام لینک‌های Markdown [متن](لینک)
     text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
     
-    # حذف فضاهای اضافی و خطوط خالی
+    # حذف URL های مستقیم
+    text = re.sub(r'https?://\S+', '', text)
+    
+    # حذف تگ‌ها و هشتگ‌های رایج کانال‌ها
+    text = re.sub(r'#\w+', '', text)
+    
+    # حذف متن‌های تبلیغاتی و مشخصات کانال
+    patterns_to_remove = [
+        r'کانال.*فیلم',
+        r'Channel.*Movie',
+        r'Download.*Film',
+        r'فیلم.*سینمایی',
+        r'Movie.*Channel',
+        r'Join.*Channel',
+        r'عضویت.*کانال',
+        r'Telegram.*Channel',
+        r'کانال.*تلگرام',
+        r'@\w+',
+    ]
+    
+    for pattern in patterns_to_remove:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+    
+    # تمیز کردن فضاهای اضافی و خطوط خالی
+    lines = text.split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        line = line.strip()
+        # حذف خطوط خالی و خطوطی که فقط شامل کاراکترهای خاص هستند
+        if line and not re.match(r'^[_\-\=\.\*~]+$', line):
+            cleaned_lines.append(line)
+    
+    text = '\n'.join(cleaned_lines)
+    
+    # حذف خطوط خالی متوالی
     text = re.sub(r'\n\s*\n', '\n\n', text)
     text = text.strip()
     
@@ -202,8 +236,17 @@ async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # دریافت کپشن کامل
     original_text = (msg.caption or msg.text or "").strip()
     
-    # پاکسازی کپشن
+    # پاکسازی کامل کپشن - فقط مشخصات فیلم باقی بماند
     cleaned_text = clean_caption(original_text)
+    
+    # اگر بعد از پاکسازی چیزی نماند، از متن اصلی استفاده کن (اما بدون تگ‌ها)
+    if not cleaned_text.strip():
+        # حداقل پاکسازی برای حذف تگ‌ها
+        cleaned_text = re.sub(r'@\w+', '', original_text)
+        cleaned_text = re.sub(r'<a[^>]*>', '', cleaned_text)
+        cleaned_text = re.sub(r'</a>', '', cleaned_text)
+        cleaned_text = re.sub(r'https?://\S+', '', cleaned_text)
+        cleaned_text = cleaned_text.strip()
     
     # اضافه کردن فوتر
     final_text = f"{cleaned_text}\n\n{FOOTER_TEMPLATE}".strip()
@@ -269,7 +312,7 @@ def main():
         handler
     ))
     
-    logger.info("ربات فعال شد - منتظر پست‌های جدید...")
+    logger.info("ربات فعال شد - فقط مشخصات فیلم + فوتر اپی‌مووی ارسال می‌شود")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
