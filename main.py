@@ -126,7 +126,12 @@ async def send_long_message(bot, chat_id, text, reply_to_message_id=None):
             first_message_id = message.message_id
 
 async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.channel_post
+    # بررسی اینکه آیا پست از کانال است
+    if not update.channel_post and not update.edited_channel_post:
+        return
+        
+    msg = update.channel_post or update.edited_channel_post
+    
     if not msg or msg.chat.id != SOURCE_CHANNEL_ID or db.seen(msg.message_id):
         return
 
@@ -226,7 +231,12 @@ async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(MessageHandler(filters.CHANNEL_POST, handler))
+    
+    # استفاده از فیلتر مناسب برای نسخه‌های جدید کتابخانه
+    app.add_handler(MessageHandler(
+        filters.Chat(chat_id=SOURCE_CHANNEL_ID) & (filters.UpdateType.CHANNEL_POSTS),
+        handler
+    ))
     
     logger.info("ربات فعال شد - منتظر پست‌های جدید...")
     app.run_polling(drop_pending_updates=True)
