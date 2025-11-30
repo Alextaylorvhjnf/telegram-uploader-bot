@@ -5,31 +5,30 @@ import re
 import asyncio
 from telegram import Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
-from telegram.constants import ParseMode
 
-# ==================== تنظیمات از Environment Variables ====================
+# ==================== تنظیمات مستقیم ====================
 BOT_TOKEN = "8379314037:AAEpz2EuVtkynaFqCi16bCJvRlMRnTr8K7w"
-SOURCE_CHANNEL_ID = -1003319450332  # کانال سورس
-DESTINATION_CHANNEL_ID = -1002061481133  # کانال مقصد
-REPLACEMENT_USERNAME = "@apmovienet"  # یوزرنیم ثابت برای جایگزینی
+SOURCE_CHANNEL_ID = -1003319450332
+DESTINATION_CHANNEL_ID = -1002061481133
+REPLACEMENT_USERNAME = "@apmovienet"
 
 # ==================== قالب ثابت فوتر ====================
-FOOTER_TEMPLATE = """📅 تاریخ پخش: {release_date}
+FOOTER_TEMPLATE = """📅 تاریخ پخش:{2025/01/25}
 🌐 وبسایت و اپلیکیشن: Apmovie.net
 
 ───────────────
 🌟 اپی‌مووی | خانه سینما
 
-[📱 دانلود اپلیکیشن اندروید موبایل](https://dl.apmovie.net/APPS/Apmovie.apk)
+📱 دانلود اپلیکیشن اندروید موبایل (https://dl.apmovie.net/APPS/Apmovie.apk)
 
-[🖥 دانلود اپلیکیشن اندروید تی‌وی](https://dl.apmovie.net/APPS/Apmovie-TV.apk)
+🖥 دانلود اپلیکیشن اندروید تی‌وی (https://dl.apmovie.net/APPS/Apmovie-TV.apk)
 
 🔴 برای ورود به اپلیکیشن ها نیازی به VPN نیست گرچه باز بودن آن هیچ مشکلی در کارکرد برنامه ها ایجاد نمیکند.
 
 ───────────────
-[⚫️ @apmovienet](https://t.me/apmovienet) | اپی‌مووی فارسی
-[🟡 @PakhshinoTV](https://t.me/PakhshinoTV) | کانال دوم
-[🔵 @apmovie_Support](https://t.me/apmovie_Support) | پشتیبانی
+⚫️ @apmovienet (https://t.me/apmovienet) | اپی‌مووی فارسی
+🟡 @PakhshinoTV (https://t.me/PakhshinoTV) | کانال دوم
+🔵 @apmovie_Support (https://t.me/apmovie_Support) | پشتیبانی
 
 ───────────────
 🎧 پشتیبانی فارسی:
@@ -87,71 +86,75 @@ class Database:
     def close(self):
         self.conn.close()
 
-def extract_release_date(text: str) -> str:
-    """استخراج تاریخ پخش از متن اصلی"""
-    date_pattern = r'📅\s*تاریخ\s*پخش:\s*{([^}]+)}'
-    match = re.search(date_pattern, text)
-    if match:
-        return match.group(1)
-    return "2025/01/25"  # تاریخ پیش‌فرض
-
 def replace_usernames(text: str) -> str:
-    """جایگزینی یوزرنیم‌ها و پردازش متن اصلی"""
+    """جایگزینی یوزرنیم‌ها"""
     if not text:
         return text
     
-    # الگو برای پیدا کردن یوزرنیم‌های تلگرام
     username_pattern = r'@[a-zA-Z0-9_]{1,32}'
     replaced_text = re.sub(username_pattern, REPLACEMENT_USERNAME, text)
     
-    # حذف بخش فوتر قدیمی (اگر وجود دارد)
-    footer_patterns = [
-        r'📅\s*تاریخ\s*پخش:.*$',
-        r'🌐\s*وبسایت\s*و\s*اپلیکیشن:.*$',
-        r'───────────────.*$',
-        r'📱\s*دانلود\s*اپلیکیشن.*$',
-        r'🖥\s*دانلود\s*اپلیکیشن.*$',
-        r'🔴\s*برای\s*ورود\s*به\s*اپلیکیشن.*$',
-        r'⚫️\s*@.*$',
-        r'🟡\s*@.*$', 
-        r'🔵\s*@.*$',
-        r'🎧\s*پشتیبانی\s*فارسی:.*$',
-        r'🙏\s*از\s*حمایت\s*ارزشمند.*$',
-        r'🎥\s*با\s*اپی‌مووی.*$'
-    ]
-    
-    for pattern in footer_patterns:
-        replaced_text = re.sub(pattern, '', replaced_text, flags=re.MULTILINE | re.DOTALL)
-    
-    # پاکسازی خطوط خالی اضافی
-    lines = replaced_text.split('\n')
-    cleaned_lines = []
-    for line in lines:
-        if line.strip() and not any(footer in line for footer in ['📅', '🌐', '📱', '🖥', '🔴', '⚫️', '🟡', '🔵', '🎧', '🙏', '🎥']):
-            cleaned_lines.append(line)
-    
-    cleaned_text = '\n'.join(cleaned_lines).strip()
-    
-    # لاگ تغییرات
     original_usernames = re.findall(username_pattern, text)
     if original_usernames:
         logger.info(f"🔁 جایگزینی {len(original_usernames)} یوزرنیم: {set(original_usernames)} -> {REPLACEMENT_USERNAME}")
     
-    return cleaned_text
+    return replaced_text
 
 def process_content(original_text: str) -> str:
     """پردازش کامل محتوا و اضافه کردن فوتر ثابت"""
     if not original_text:
-        return FOOTER_TEMPLATE.format(release_date="2025/01/25")
+        return FOOTER_TEMPLATE
     
-    # استخراج تاریخ از متن اصلی
-    release_date = extract_release_date(original_text)
-    
-    # جایگزینی یوزرنیم‌ها و حذف فوتر قدیمی
+    # جایگزینی یوزرنیم‌ها
     main_content = replace_usernames(original_text)
     
+    # حذف فوترهای قدیمی اگر وجود دارند
+    footer_keywords = [
+        '📅 تاریخ پخش:',
+        '🌐 وبسایت و اپلیکیشن:',
+        '───────────────',
+        '🌟 اپی‌مووی | خانه سینما',
+        '📱 دانلود اپلیکیشن اندروید موبایل',
+        '🖥 دانلود اپلیکیشن اندروید تی‌وی',
+        '🔴 برای ورود به اپلیکیشن ها',
+        '⚫️ @',
+        '🟡 @', 
+        '🔵 @',
+        '🎧 پشتیبانی فارسی:',
+        '🙏 از حمایت ارزشمند',
+        '🎥 با اپی‌مووی'
+    ]
+    
+    lines = main_content.split('\n')
+    cleaned_lines = []
+    in_footer = False
+    
+    for line in lines:
+        line_stripped = line.strip()
+        
+        # اگر خط با کلمات کلیدی فوتر شروع شود، وارد بخش فوتر می‌شویم
+        if any(line_stripped.startswith(keyword) for keyword in footer_keywords):
+            in_footer = True
+            continue
+        
+        # اگر خط خالی بعد از فوتر باشد، آن را نگه دار
+        if in_footer and not line_stripped:
+            continue
+            
+        # اگر خط جدیدی که جزو فوتر نیست بیاید، از حالت فوتر خارج شو
+        if in_footer and line_stripped and not any(line_stripped.startswith(keyword) for keyword in footer_keywords):
+            in_footer = False
+        
+        if not in_footer:
+            cleaned_lines.append(line)
+    
+    main_content_cleaned = '\n'.join(cleaned_lines).strip()
+    
     # ترکیب محتوای اصلی با فوتر جدید
-    final_content = f"{main_content}\n\n{FOOTER_TEMPLATE.format(release_date=release_date)}"
+    if main_content_cleaned:
+        final_content = f"{main_content_cleaned}\n\n{FOOTER_TEMPLATE}"
+    else:
+        final_content = FOOTER_TEMPLATE
     
     logger.info("✅ محتوا با فوتر جدید پردازش شد")
     return final_content
@@ -179,13 +182,15 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
             processed_text = process_content(message.caption)
             logger.info("📝 پردازش کپشن مدیا")
         
+        # اگر هیچ متنی برای پردازش نبود، از فوتر ثابت استفاده کن
+        if not processed_text:
+            processed_text = FOOTER_TEMPLATE
+        
         # ارسال به کانال مقصد
         if message.text and not message.media:
             await context.bot.send_message(
                 chat_id=DESTINATION_CHANNEL_ID,
-                text=processed_text,
-                parse_mode=ParseMode.MARKDOWN_V2,
-                disable_web_page_preview=False
+                text=processed_text
             )
             logger.info("✅ پیام متنی با فوتر جدید ارسال شد")
         
@@ -193,8 +198,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
             await context.bot.send_photo(
                 chat_id=DESTINATION_CHANNEL_ID,
                 photo=message.photo[-1].file_id,
-                caption=processed_text,
-                parse_mode=ParseMode.MARKDOWN_V2
+                caption=processed_text
             )
             logger.info("✅ عکس با کپشن و فوتر جدید ارسال شد")
         
@@ -202,8 +206,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
             await context.bot.send_video(
                 chat_id=DESTINATION_CHANNEL_ID,
                 video=message.video.file_id,
-                caption=processed_text,
-                parse_mode=ParseMode.MARKDOWN_V2
+                caption=processed_text
             )
             logger.info("✅ ویدیو با کپشن و فوتر جدید ارسال شد")
         
@@ -211,8 +214,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
             await context.bot.send_document(
                 chat_id=DESTINATION_CHANNEL_ID,
                 document=message.document.file_id,
-                caption=processed_text,
-                parse_mode=ParseMode.MARKDOWN_V2
+                caption=processed_text
             )
             logger.info("✅ فایل با کپشن و فوتر جدید ارسال شد")
         
@@ -220,59 +222,31 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
             await context.bot.send_audio(
                 chat_id=DESTINATION_CHANNEL_ID,
                 audio=message.audio.file_id,
-                caption=processed_text,
-                parse_mode=ParseMode.MARKDOWN_V2
+                caption=processed_text
             )
             logger.info("✅ audio با کپشن و فوتر جدید ارسال شد")
         
         else:
-            if processed_text:
-                await context.bot.send_message(
-                    chat_id=DESTINATION_CHANNEL_ID,
-                    text=processed_text,
-                    parse_mode=ParseMode.MARKDOWN_V2
-                )
-                logger.info("✅ متن پردازش شده با فوتر جدید ارسال شد")
-            else:
-                # اگر محتوایی برای پردازش نبود، فقط فوتر را ارسال کن
-                await context.bot.send_message(
-                    chat_id=DESTINATION_CHANNEL_ID,
-                    text=FOOTER_TEMPLATE.format(release_date="2025/01/25"),
-                    parse_mode=ParseMode.MARKDOWN_V2
-                )
-                logger.info("✅ فوتر ثابت ارسال شد")
+            # برای انواع دیگر پیام
+            await context.bot.send_message(
+                chat_id=DESTINATION_CHANNEL_ID,
+                text=processed_text
+            )
+            logger.info("✅ متن پردازش شده با فوتر جدید ارسال شد")
         
         db.mark_message_processed(message.message_id)
         logger.info(f"🎉 پیام {message.message_id} با موفقیت پردازش و ارسال شد")
         
     except Exception as e:
         logger.error(f"❌ خطا در پردازش پیام {message.message_id}: {str(e)}")
-        # تلاش برای ارسال بدون markdown در صورت خطا
-        try:
-            if message.text and not message.media:
-                await context.bot.send_message(
-                    chat_id=DESTINATION_CHANNEL_ID,
-                    text=processed_text or message.text
-                )
-            elif message.media:
-                await context.bot.send_message(
-                    chat_id=DESTINATION_CHANNEL_ID,
-                    text="پیام جدید - خطا در پردازش markdown"
-                )
-        except Exception as fallback_error:
-            logger.error(f"❌ خطا در ارسال جایگزین: {fallback_error}")
     
     finally:
         db.close()
 
 async def main():
-    """تابع اصلی با async"""
-    if not BOT_TOKEN:
-        logger.error("❌ توکن ربات تنظیم نشده است!")
-        return
-    
+    """تابع اصلی"""
     try:
-        # ایجاد اپلیکیشن با تنظیمات بهینه
+        # ایجاد اپلیکیشن
         application = Application.builder().token(BOT_TOKEN).build()
         
         # افزودن هندلر
@@ -284,16 +258,14 @@ async def main():
         logger.info(f"🔁 جایگزینی یوزرنیم‌ها با: {REPLACEMENT_USERNAME}")
         logger.info("📋 قالب ثابت فوتر فعال شده است")
         
-        # راه‌اندازی با تنظیمات بهینه برای Railway
+        # راه‌اندازی
         await application.run_polling(
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
-            close_loop=False
+            drop_pending_updates=True
         )
         
     except Exception as e:
         logger.error(f"❌ خطای جدی در ربات: {e}")
 
 if __name__ == '__main__':
-    # اجرای اصلی
     asyncio.run(main())
