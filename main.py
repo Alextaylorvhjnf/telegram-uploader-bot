@@ -132,95 +132,116 @@ def clean_old_footer(content: str) -> str:
     
     return cleaned_content
 
-def extract_and_preserve_summary(content: str) -> str:
-    """استخراج و حفظ بخش‌های مهم شامل خلاصه داستان"""
+def extract_and_preserve_all_info(content: str) -> str:
+    """استخراج و حفظ تمام اطلاعات مهم شامل توضیحات، امتیاز، ژانر، مدت زمان و خلاصه داستان"""
     if not content:
         return content
     
-    # پیدا کردن بخش‌های مهم شامل خلاصه داستان
-    summary_keywords = [
-        'خلاصه داستان:',
-        'خلاصه فیلم:',
-        'خلاصه سریال:',
-        'خلاصه داستان',
-        'خلاصه فیلم',
-        'خلاصه سریال',
-        'داستان:',
-        'توضیحات:',
-        '📖 خلاصه داستان',
-        '🎬 خلاصه فیلم',
-        '📺 خلاصه سریال'
+    # کلمات کلیدی برای شناسایی تمام بخش‌های مهم
+    important_keywords = [
+        'دانلود فیلم', 'دانلود سریال',
+        '🏅امتیاز', '🎖امتیاز', '⭐امتیاز', '🌟امتیاز',
+        '📝 #', '🎙 #', '🔥با هنرنمایی', '🎭 با هنرنمایی',
+        '📤 کیفیت', '🎞 کیفیت', '📽 کیفیت',
+        '🔹ژانر', '🎭 ژانر', '📺 ژانر',
+        '⏰مدت زمان', '🕐 مدت زمان', '⏳ مدت زمان',
+        '👔کارگردان', '🎬 کارگردان', '📋 کارگردان',
+        '🌟ستارگان', '🎭 ستارگان', '👥 ستارگان',
+        '🌍محصول کشور', '🗺 محصول کشور', '🌎 محصول کشور',
+        '🎞خلاصه داستان', '🎬خلاصه فیلم', '📺خلاصه سریال',
+        'خلاصه داستان:', 'خلاصه فیلم:', 'خلاصه سریال:',
+        'خلاصه داستان', 'خلاصه فیلم', 'خلاصه سریال',
+        'داستان:', 'توضیحات:', '📖 خلاصه', '🎥 خلاصه'
     ]
     
     lines = content.split('\n')
     preserved_lines = []
-    found_summary = False
+    found_important_section = False
     
     for line in lines:
         line_stripped = line.strip()
         
-        # اگر خط با کلمات کلیدی خلاصه شروع شود، آن را حفظ کن
-        if any(line_stripped.startswith(keyword) for keyword in summary_keywords):
-            found_summary = True
+        # اگر خط شامل کلمات کلیدی مهم باشد
+        if any(keyword in line for keyword in important_keywords):
+            found_important_section = True
             preserved_lines.append(line)
             continue
         
-        # اگر در حال خواندن خلاصه هستیم و خط خالی نیست، ادامه بده
-        if found_summary and line_stripped:
+        # اگر در حال خواندن بخش مهم هستیم و خط خالی نیست، ادامه بده
+        if found_important_section and line_stripped:
             preserved_lines.append(line)
-        elif found_summary and not line_stripped:
-            # اگر خط خالی بعد از خلاصه آمد، خلاصه تمام شده
-            found_summary = False
-            preserved_lines.append(line)
-        elif not found_summary:
-            # خطوط دیگر را نیز حفظ کن (عنوان، امتیاز، ژانر و ...)
+        elif found_important_section and not line_stripped:
+            # اگر خط خالی بعد از بخش مهم آمد، بررسی کن آیا بخش تمام شده
+            if preserved_lines and any(keyword in preserved_lines[-1] for keyword in ['خلاصه داستان', 'خلاصه فیلم', 'خلاصه سریال']):
+                # اگر خط قبل خلاصه بوده، خط خالی را نگه دار (ممکن است بخشی از خلاصه باشد)
+                preserved_lines.append(line)
+            else:
+                found_important_section = False
+        elif not found_important_section and line_stripped:
+            # خطوط دیگر که ممکن است حاوی اطلاعات مفید باشند را نیز حفظ کن
             preserved_lines.append(line)
     
-    return '\n'.join(preserved_lines)
+    # حذف خطوط خالی اضافی در انتها
+    while preserved_lines and not preserved_lines[-1].strip():
+        preserved_lines.pop()
+    
+    result = '\n'.join(preserved_lines)
+    
+    # اگر هیچ خطی حفظ نشد، کل محتوا را برگردان
+    if not result.strip():
+        return content
+    
+    return result
 
-def smart_truncate_with_summary(text: str, max_length: int, is_caption: bool = False) -> str:
-    """کوتاه کردن هوشمند متن با اولویت حفظ خلاصه داستان"""
-    if len(text) <= max_length:
-        return text
+def smart_truncate_with_priority(content: str, max_length: int, is_caption: bool = False) -> str:
+    """کوتاه کردن هوشمند متن با اولویت حفظ تمام اطلاعات مهم"""
+    if len(content) <= max_length:
+        return content
     
-    logger.warning(f"متن از {max_length} کاراکتر بیشتر است، در حال کوتاه کردن با حفظ خلاصه...")
+    logger.warning(f"متن از {max_length} کاراکتر بیشتر است، در حال کوتاه کردن با حفظ اطلاعات مهم...")
     
-    # ابتدا خلاصه داستان را استخراج کن
-    summary_content = extract_and_preserve_summary(text)
+    # ابتدا تمام اطلاعات مهم را استخراج کن
+    important_content = extract_and_preserve_all_info(content)
     
-    # اگر خلاصه داستان خودش از حد مجاز بیشتر است، آن را کوتاه کن
-    if len(summary_content) > max_length:
-        logger.warning("خلاصه داستان نیز طولانی است، کوتاه کردن...")
-        # کوتاه کردن از انتهای خلاصه
-        return summary_content[:max_length - 3] + "..."
-    
-    # اگر خلاصه داستان در متن اصلی موجود است
-    summary_keywords = ['خلاصه داستان:', 'خلاصه فیلم:', 'خلاصه سریال:']
-    summary_start = -1
-    
-    for keyword in summary_keywords:
-        summary_start = text.find(keyword)
-        if summary_start != -1:
-            break
-    
-    if summary_start != -1:
-        # بخش قبل از خلاصه و خود خلاصه را جدا کن
-        before_summary = text[:summary_start]
-        summary_section = text[summary_start:]
+    # اگر محتوای مهم خودش از حد مجاز بیشتر است، آن را کوتاه کن
+    if len(important_content) > max_length:
+        logger.warning("محتوای مهم نیز طولانی است، کوتاه کردن نهایی...")
         
-        # فضای قابل استفاده برای بخش قبل از خلاصه
-        available_space = max_length - len(summary_section) - 3
+        # پیدا کردن خلاصه داستان برای اولویت بالاتر
+        summary_patterns = [
+            r'🎞خلاصه داستان:.*',
+            r'🎬خلاصه فیلم:.*',
+            r'📺خلاصه سریال:.*',
+            r'خلاصه داستان:.*',
+            r'خلاصه فیلم:.*',
+            r'خلاصه سریال:.*'
+        ]
         
-        if available_space > 50:  # حداقل 50 کاراکتر برای بخش قبل از خلاصه
-            # کوتاه کردن بخش قبل از خلاصه
-            before_summary_short = before_summary[:available_space] + "..."
-            return before_summary_short + summary_section
+        summary_match = None
+        for pattern in summary_patterns:
+            summary_match = re.search(pattern, important_content, re.DOTALL)
+            if summary_match:
+                break
+        
+        if summary_match:
+            summary_text = summary_match.group(0)
+            # پیدا کردن بخش قبل از خلاصه
+            before_summary = important_content[:summary_match.start()]
+            
+            # محاسبه فضای قابل استفاده
+            available_for_summary = max_length - len(before_summary) - 3
+            
+            if available_for_summary > 100:  # حداقل 100 کاراکتر برای خلاصه
+                truncated_summary = summary_text[:available_for_summary - 3] + "..."
+                return before_summary + truncated_summary
+            else:
+                # اگر فضای کافی نیست، فقط بخش قبل از خلاصه را نگه دار
+                return before_summary[:max_length - 3] + "..."
         else:
-            # اگر فضای کافی نیست، فقط خلاصه را نگه دار
-            return summary_section[:max_length - 3] + "..."
-    else:
-        # اگر خلاصه پیدا نشد، کوتاه کردن عادی
-        return text[:max_length - 3] + "..."
+            # اگر خلاصه پیدا نشد، کوتاه کردن از انتها
+            return important_content[:max_length - 3] + "..."
+    
+    return important_content
 
 def process_content(original_text: str, is_caption: bool = False) -> str:
     """پردازش کامل محتوا و اضافه کردن فوتر ثابت"""
@@ -236,13 +257,13 @@ def process_content(original_text: str, is_caption: bool = False) -> str:
     # فرار کردن کاراکترهای HTML در محتوای اصلی
     main_content = escape_html(main_content)
     
-    # اگر کپشن است، محتوای اصلی را با اولویت حفظ خلاصه کوتاه کن
+    # اگر کپشن است، محتوای اصلی را با اولویت حفظ اطلاعات مهم کوتاه کن
     max_allowed = 1024 if is_caption else 4096
     
     if len(main_content) + len(FOOTER_TEMPLATE) + 10 > max_allowed:
         available_space = max_allowed - len(FOOTER_TEMPLATE) - 10
         if available_space > 100:
-            main_content = smart_truncate_with_summary(main_content, available_space, is_caption)
+            main_content = smart_truncate_with_priority(main_content, available_space, is_caption)
         else:
             # اگر فضای کافی نیست، فقط فوتر را بفرست
             return FOOTER_TEMPLATE
@@ -255,7 +276,7 @@ def process_content(original_text: str, is_caption: bool = False) -> str:
         logger.warning(f"متن نهایی هنوز از {max_allowed} کاراکتر بیشتر است، کوتاه کردن نهایی...")
         available_space = max_allowed - len(FOOTER_TEMPLATE) - 10
         if available_space > 100:
-            main_content = smart_truncate_with_summary(main_content, available_space, is_caption)
+            main_content = smart_truncate_with_priority(main_content, available_space, is_caption)
             final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
         else:
             final_content = FOOTER_TEMPLATE
@@ -277,6 +298,12 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
             return
         
         logger.info(f"📨 دریافت پیام جدید: {message.message_id}")
+        
+        # لاگ محتوای اصلی برای دیباگ
+        if message.text:
+            logger.info(f"📝 متن اصلی: {message.text[:200]}...")
+        elif message.caption:
+            logger.info(f"📝 کپشن اصلی: {message.caption[:200]}...")
         
         processed_text = None
         is_caption = False
@@ -349,22 +376,22 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
         
         # تلاش برای ارسال بسیار ساده در صورت خطا
         try:
-            # ایجاد محتوای بسیار کوتاه با حفظ خلاصه
+            # ایجاد محتوای بسیار کوتاه با حفظ اطلاعات مهم
             simple_content = ""
             if message.text:
                 simple_content = replace_usernames(message.text)
             elif message.caption:
                 simple_content = replace_usernames(message.caption)
             
-            # استخراج خلاصه برای نسخه ساده
-            summary_simple = extract_and_preserve_summary(simple_content)
-            if len(summary_simple) > 500:
-                summary_simple = summary_simple[:497] + "..."
+            # استخراج اطلاعات مهم برای نسخه ساده
+            important_simple = extract_and_preserve_all_info(simple_content)
+            if len(important_simple) > 500:
+                important_simple = important_simple[:497] + "..."
             
             simple_footer = "📥 برای دریافت کامل به کانال مراجعه کنید: @apmovienet"
             
-            if summary_simple:
-                final_simple = f"{summary_simple}\n\n{simple_footer}"
+            if important_simple:
+                final_simple = f"{important_simple}\n\n{simple_footer}"
             else:
                 final_simple = f"🎬 پست جدید\n\n{simple_footer}"
             
@@ -391,7 +418,7 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
                     chat_id=DESTINATION_CHANNEL_ID,
                     text=final_simple
                 )
-            logger.info("✅ پست با متن ساده و حفظ خلاصه ارسال شد")
+            logger.info("✅ پست با متن ساده و حفظ اطلاعات مهم ارسال شد")
         except Exception as fallback_error:
             logger.error(f"❌ خطا در ارسال جایگزین: {fallback_error}")
     
@@ -410,8 +437,8 @@ def main():
     logger.info("📋 قالب ثابت فوتر با لینک‌های HTML فعال شد")
     logger.info("⚠️ مدیریت طول متن فعال شد (کپشن: 1024 کاراکتر، متن: 4096 کاراکتر)")
     logger.info("🔗 لینک‌های قابل کلیک فعال شدند")
-    logger.info("📖 حفظ کامل توضیحات و خلاصه داستان فعال شد")
-    logger.info("🎯 اولویت با حفظ خلاصه داستان، خلاصه فیلم و خلاصه سریال")
+    logger.info("📖 حفظ کامل تمام اطلاعات مهم فعال شد")
+    logger.info("🎯 اولویت با حفظ: عنوان، امتیاز، ژانر، مدت زمان، کارگردان، ستارگان و خلاصه داستان")
     
     # راه‌اندازی با تنظیمات بهینه برای جلوگیری از Conflict
     application.run_polling(
