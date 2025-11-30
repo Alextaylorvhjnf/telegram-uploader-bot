@@ -2,7 +2,6 @@ import os
 import logging
 import sqlite3
 import re
-import asyncio
 from telegram import Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
@@ -107,35 +106,8 @@ def process_content(original_text: str) -> str:
     # جایگزینی یوزرنیم‌ها
     main_content = replace_usernames(original_text)
     
-    # حذف فوترهای قدیمی اگر وجود دارند
-    footer_patterns = [
-        r'📅 تاریخ پخش:\{.*?\}.*?🎥 با اپی‌مووی، دنیای سینما در دستان شماست\.',
-        r'🌐 وبسایت و اپلیکیشن: Apmovie\.net.*?🎥 با اپی‌مووی، دنیای سینما در دستان شماست\.',
-    ]
-    
-    for pattern in footer_patterns:
-        main_content = re.sub(pattern, '', main_content, flags=re.DOTALL)
-    
-    # پاکسازی خطوط خالی اضافی
-    lines = main_content.split('\n')
-    cleaned_lines = []
-    for line in lines:
-        stripped_line = line.strip()
-        if stripped_line and not any(keyword in stripped_line for keyword in [
-            '📅 تاریخ پخش:', '🌐 وبسایت و اپلیکیشن:', '🌟 اپی‌مووی | خانه سینما',
-            '📱 دانلود اپلیکیشن اندروید موبایل', '🖥 دانلود اپلیکیشن اندروید تی‌وی',
-            '🔴 برای ورود به اپلیکیشن ها', '⚫️ @', '🟡 @', '🔵 @',
-            '🎧 پشتیبانی فارسی:', '🙏 از حمایت ارزشمند', '🎥 با اپی‌مووی'
-        ]):
-            cleaned_lines.append(line)
-    
-    main_content_cleaned = '\n'.join(cleaned_lines).strip()
-    
     # ترکیب محتوای اصلی با فوتر جدید
-    if main_content_cleaned:
-        final_content = f"{main_content_cleaned}\n\n{FOOTER_TEMPLATE}"
-    else:
-        final_content = FOOTER_TEMPLATE
+    final_content = f"{main_content}\n\n{FOOTER_TEMPLATE}"
     
     logger.info("✅ محتوا با فوتر جدید پردازش شد")
     return final_content
@@ -161,7 +133,6 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
         elif message.caption:
             processed_text = process_content(message.caption)
         
-        # اگر هیچ متنی برای پردازش نبود، از فوتر ثابت استفاده کن
         if not processed_text:
             processed_text = FOOTER_TEMPLATE
         
@@ -213,12 +184,8 @@ async def process_channel_post(update: Update, context: ContextTypes.DEFAULT_TYP
     finally:
         db.close()
 
-async def main():
-    """تابع اصلی"""
-    if not BOT_TOKEN:
-        logger.error("توکن ربات تنظیم نشده است!")
-        return
-    
+def main():
+    """تابع اصلی - بدون asyncio.run"""
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(MessageHandler(filters.Chat(SOURCE_CHANNEL_ID), process_channel_post))
     
@@ -228,10 +195,11 @@ async def main():
     logger.info(f"جایگزینی با: {REPLACEMENT_USERNAME}")
     logger.info("قالب ثابت فوتر فعال شد")
     
+    # استفاده از run_polling به صورت مستقیم
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
         drop_pending_updates=True
     )
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
